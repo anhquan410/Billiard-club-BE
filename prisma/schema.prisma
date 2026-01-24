@@ -1,0 +1,253 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+  CUSTOMER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model User {
+  id        String     @id @default(uuid())
+  username  String     @unique
+  email     String     @unique
+  password  String
+  fullName  String     @map("full_name")
+  phone     String?
+  role      UserRole   @default(CUSTOMER)
+  status    UserStatus @default(ACTIVE)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  createdOrders   Order[]         @relation("CreatedByUser")
+  handledSessions TableSession[]  @relation("HandledByStaff")
+  stockMovements  StockMovement[] @relation("CreatedByUser")
+
+  @@map("users")
+}
+
+// ==================== TABLE MANAGEMENT ====================
+
+enum TableStatus {
+  AVAILABLE // Bàn trống
+  OCCUPIED // Đang chơi
+  RESERVED // Đã đặt
+  MAINTENANCE // Bảo trì
+}
+
+model Table {
+  id          String      @id @default(uuid())
+  tableNumber String      @unique @map("table_number") // Số bàn:  B1, B2, B3... 
+  tableName   String      @map("table_name") // Tên bàn
+  hourlyRate  Decimal     @map("hourly_rate") @db.Decimal(10, 2) // Giá theo giờ
+  status      TableStatus @default(AVAILABLE)
+  description String?
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  sessions TableSession[]
+
+  @@map("tables")
+}
+
+enum SessionStatus {
+  ACTIVE // Đang chơi
+  COMPLETED // Đã thanh toán
+  CANCELLED // Đã hủy
+}
+
+model TableSession {
+  id         String        @id @default(uuid())
+  tableId    String        @map("table_id")
+  staffId    String        @map("staff_id") // Nhân viên xử lý
+  startTime  DateTime      @default(now()) @map("start_time")
+  endTime    DateTime?     @map("end_time")
+  duration   Int?          @default(0) // Thời gian chơi (phút)
+  tablePrice Decimal       @default(0) @map("table_price") @db.Decimal(10, 2) // Tiền bàn
+  totalPrice Decimal       @default(0) @map("total_price") @db.Decimal(10, 2) // Tổng tiền (bàn + dịch vụ)
+  status     SessionStatus @default(ACTIVE)
+  note       String?
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  table    Table                 @relation(fields: [tableId], references: [id])
+  staff    User                  @relation("HandledByStaff", fields: [staffId], references: [id])
+  services TableSessionService[]
+  order    Order?
+
+  @@map("table_sessions")
+}
+
+// Dịch vụ được thêm vào bàn (đồ ăn, nước uống)
+model TableSessionService {
+  id        String   @id @default(uuid())
+  sessionId String   @map("session_id")
+  productId String   @map("product_id")
+  quantity  Int      @default(1)
+  price     Decimal  @db.Decimal(10, 2) // Giá tại thời điểm đặt
+  subtotal  Decimal  @db.Decimal(10, 2) // quantity * price
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  session TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  product Product      @relation(fields: [productId], references: [id])
+
+  @@map("table_session_services")
+}
+
+// ==================== PRODUCT & INVENTORY ====================
+
+enum ProductCategory {
+  FOOD // Đồ ăn
+  BEVERAGE // Nước uống
+  EQUIPMENT // Thiết bị (phấn, cơ, ...)
+  OTHER // Khác
+}
+
+enum ProductStatus {
+  AVAILABLE
+  OUT_OF_STOCK
+  DISCONTINUED
+}
+
+model Product {
+  id          String          @id @default(uuid())
+  name        String          @unique // Tên sản phẩm
+  description String?
+  category    ProductCategory
+  price       Decimal         @db.Decimal(10, 2) // Giá bán
+  costPrice   Decimal         @map("cost_price") @db.Decimal(10, 2) // Giá vốn
+  stock       Int             @default(0) // Số lượng tồn kho
+  minStock    Int             @default(0) @map("min_stock") // Ngưỡng cảnh báo
+  unit        String          @default("cái") // Đơn vị:  chai, lon, cái, ...
+  status      ProductStatus   @default(AVAILABLE)
+  imageUrl    String?         @map("image_url")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  sessionServices TableSessionService[]
+  orderItems      OrderItem[]
+  stockMovements  StockMovement[]
+
+  @@map("products")
+}
+
+enum MovementType {
+  IMPORT // Nhập kho
+  EXPORT // Xuất kho (bán hoặc hư hỏng)
+  ADJUST // Điều chỉnh
+}
+
+model StockMovement {
+  id          String       @id @default(uuid())
+  productId   String       @map("product_id")
+  type        MovementType
+  quantity    Int // Số lượng (+ là nhập, - là xuất)
+  beforeStock Int          @map("before_stock") // Tồn kho trước
+  afterStock  Int          @map("after_stock") // Tồn kho sau
+  unitPrice   Decimal?     @map("unit_price") @db.Decimal(10, 2) // Giá nhập (nếu là IMPORT)
+  totalValue  Decimal?     @map("total_value") @db.Decimal(10, 2) // Tổng giá trị
+  reason      String? // Lý do xuất/nhập
+  createdBy   String       @map("created_by")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id])
+  user    User    @relation("CreatedByUser", fields: [createdBy], references: [id])
+
+  @@map("stock_movements")
+}
+
+// ==================== ORDER & PAYMENT ====================
+
+enum OrderStatus {
+  PENDING // Chờ thanh toán
+  PAID // Đã thanh toán
+  CANCELLED // Đã hủy
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  MOMO
+  VNPAY
+  OTHER
+}
+
+model Order {
+  id            String        @id @default(uuid())
+  orderNumber   String        @unique @map("order_number") // Mã hóa đơn:  HD001, HD002... 
+  sessionId     String?       @unique @map("session_id") // Liên kết với session bàn (nếu có)
+  customerId    String?       @map("customer_id")
+  createdBy     String        @map("created_by") // Staff tạo hóa đơn
+  subtotal      Decimal       @db.Decimal(10, 2) // Tổng tiền hàng
+  discount      Decimal       @default(0) @db.Decimal(10, 2) // Giảm giá
+  tax           Decimal       @default(0) @db.Decimal(10, 2) // Thuế (nếu có)
+  total         Decimal       @db.Decimal(10, 2) // Tổng thanh toán
+  paymentMethod PaymentMethod @map("payment_method")
+  status        OrderStatus   @default(PENDING)
+  paidAt        DateTime?     @map("paid_at")
+  note          String?
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  session  TableSession? @relation(fields: [sessionId], references: [id])
+  customer User?         @relation("CreatedByUser", fields: [customerId], references: [id])
+  items    OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String  @map("order_id")
+  productId String  @map("product_id")
+  quantity  Int
+  price     Decimal @db.Decimal(10, 2) // Giá tại thời điểm bán
+  subtotal  Decimal @db.Decimal(10, 2) // quantity * price
+
+  // Relations
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+// ==================== REPORTS (Optional - có thể tính toán từ Orders) ====================
+
+model DailyReport {
+  id              String   @id @default(uuid())
+  reportDate      DateTime @unique @map("report_date") @db.Date
+  totalRevenue    Decimal  @map("total_revenue") @db.Decimal(12, 2)
+  totalOrders     Int      @map("total_orders")
+  totalTableHours Decimal  @map("total_table_hours") @db.Decimal(10, 2)
+  tableRevenue    Decimal  @map("table_revenue") @db.Decimal(12, 2)
+  productRevenue  Decimal  @map("product_revenue") @db.Decimal(12, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("daily_reports")
+}
