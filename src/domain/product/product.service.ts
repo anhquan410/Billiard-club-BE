@@ -1,6 +1,9 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { CreateProductDto } from './dto/create-product.dto';
+import { ProductPaginationDto } from './dto/product-pagination.dto';
 
 @Injectable()
 export class ProductService {
@@ -10,6 +13,38 @@ export class ProductService {
   async getAllProducts() {
     const products = await this.databaseService.product.findMany();
     return products;
+  }
+
+  // Paginate products
+  async paginate(query: ProductPaginationDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const { category } = query;
+
+    // Xây where filter động
+    const whereClause: any = {};
+
+    if (category) {
+      whereClause.category = category;
+    }
+
+    const [items, total] = await Promise.all([
+      this.databaseService.product.findMany({
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { category: 'desc' }, // pagination stable
+        where: whereClause,
+      }),
+      this.databaseService.product.count({ where: whereClause }),
+    ]);
+
+    return {
+      items,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   // Create a new product

@@ -56,7 +56,7 @@ enum TableStatus {
 
 model Table {
   id          String      @id @default(uuid())
-  tableNumber String      @unique @map("table_number") // Số bàn:  B1, B2, B3... 
+  tableNumber Int         @unique @map("table_number") // Số bàn:  B1, B2, B3... 
   tableName   String      @map("table_name") // Tên bàn
   hourlyRate  Decimal     @map("hourly_rate") @db.Decimal(10, 2) // Giá theo giờ
   status      TableStatus @default(AVAILABLE)
@@ -121,7 +121,12 @@ model TableSessionService {
 enum ProductCategory {
   FOOD // Đồ ăn
   BEVERAGE // Nước uống
+  SODA // Nước ngọt
+  BEER // Bia
+  COFFEE // Cà phê
   EQUIPMENT // Thiết bị (phấn, cơ, ...)
+  SERVICE // Dịch vụ (giá giờ chơi)
+  CIGARETTE // Thuốc lá
   OTHER // Khác
 }
 

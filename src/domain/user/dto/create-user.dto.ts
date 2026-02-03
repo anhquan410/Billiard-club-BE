@@ -30,4 +30,9 @@ export class CreateUserDto {
   @IsEnum(UserRole)
   @IsOptional()
   role?: UserRole;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(15)
+  phone?: string;
 }

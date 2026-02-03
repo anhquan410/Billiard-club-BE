@@ -1,0 +1,461 @@
+import { PrismaClient, TableStatus } from '@prisma/client';
+
+const prisma = new PrismaClient();
+
+// Product data
+// const products = [
+//   {
+//     name: 'Khăn lạnh',
+//     stock: 50,
+//     costPrice: 2500,
+//     price: 5000,
+//     category: 'ORTHER',
+//   },
+//   {
+//     name: 'Bò húc',
+//     stock: 0,
+//     costPrice: 10000,
+//     price: 30000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: '7 up',
+//     stock: 54,
+//     costPrice: 6428,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Ô Long',
+//     stock: 50,
+//     costPrice: 7291,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Trà xanh 0 độ',
+//     stock: 50,
+//     costPrice: 7339,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Coca-Pepsi',
+//     stock: 6,
+//     costPrice: 8088,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Sting vàng',
+//     stock: 36,
+//     costPrice: 7334,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Sting đỏ',
+//     stock: 35,
+//     costPrice: 7750,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'nutri boost dâu',
+//     stock: 26,
+//     costPrice: 7708,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Nutri boost cam',
+//     stock: 50,
+//     costPrice: 7708,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Thumb up dâu',
+//     stock: 50,
+//     costPrice: 7285,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Thumb up kiwi',
+//     stock: 50,
+//     costPrice: 7208,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Fuze Trà đào',
+//     stock: 50,
+//     costPrice: 7084,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Fuze Chanh Leo',
+//     stock: 50,
+//     costPrice: 7087,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Aquarius',
+//     stock: 50,
+//     costPrice: 6250,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Dasani',
+//     stock: 50,
+//     costPrice: 3322,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Trà C2 Táo',
+//     stock: 50,
+//     costPrice: 10000,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Revive Chanh',
+//     stock: 39,
+//     costPrice: 6625,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Revive',
+//     stock: 48,
+//     costPrice: 7041,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Fuze Chanh Sả',
+//     stock: 60,
+//     costPrice: 7083,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Trà C2 Đào',
+//     stock: 45,
+//     costPrice: 10000,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Trà C2 chanh',
+//     stock: 34,
+//     costPrice: 5820,
+//     price: 25000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Camel điếu nhỏ',
+//     stock: 15,
+//     costPrice: 11500,
+//     price: 35000,
+//     category: 'CIGARETTE',
+//   },
+//   {
+//     name: 'Mì trộn xúc xích',
+//     stock: 0,
+//     costPrice: 20000,
+//     price: 45000,
+//     category: 'FOOD',
+//   },
+//   {
+//     name: 'Mì trộn trứng',
+//     stock: 0,
+//     costPrice: 20000,
+//     price: 35000,
+//     category: 'FOOD',
+//   },
+//   {
+//     name: 'Camel dưa hấu',
+//     stock: 15,
+//     costPrice: 24800,
+//     price: 40000,
+//     category: 'CIGARETTE',
+//   },
+//   {
+//     name: 'Camel trà đen',
+//     stock: 16,
+//     costPrice: 35500,
+//     price: 45000,
+//     category: 'CIGARETTE',
+//   },
+//   {
+//     name: 'Xúc xích rán',
+//     stock: 100,
+//     costPrice: 4653,
+//     price: 15000,
+//     category: 'FOOD',
+//   },
+//   {
+//     name: 'Mì Indomie',
+//     stock: 150,
+//     costPrice: 4781,
+//     price: 13000,
+//     category: 'FOOD',
+//   },
+//   {
+//     name: 'Mì Tôm Hảo Hảo',
+//     stock: 80,
+//     costPrice: 3903,
+//     price: 10000,
+//     category: 'FOOD',
+//   },
+//   { name: 'Bài', stock: 50, costPrice: 9500, price: 15000, category: 'ORTHER' },
+//   {
+//     name: 'Trứng bán',
+//     stock: 90,
+//     costPrice: 2323,
+//     price: 8000,
+//     category: 'FOOD',
+//   },
+//   {
+//     name: 'Trà đá',
+//     stock: 0,
+//     costPrice: 3000,
+//     price: 8000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Thăng Long mềm',
+//     stock: 15,
+//     costPrice: 11300,
+//     price: 20000,
+//     category: 'CIGARETTE',
+//   },
+//   {
+//     name: 'Thăng Long cứng',
+//     stock: 15,
+//     costPrice: 12056,
+//     price: 20000,
+//     category: 'CIGARETTE',
+//   },
+//   {
+//     name: 'Mì trứng xúc xích',
+//     stock: 0,
+//     costPrice: 20000,
+//     price: 40000,
+//     category: 'FOOD',
+//   },
+//   {
+//     name: 'Mì xúc xích',
+//     stock: 0,
+//     costPrice: 20000,
+//     price: 45000,
+//     category: 'FOOD',
+//   },
+//   {
+//     name: 'Mì trứng',
+//     stock: 0,
+//     costPrice: 20000,
+//     price: 30000,
+//     category: 'FOOD',
+//   },
+//   {
+//     name: 'Mì trộn',
+//     stock: 0,
+//     costPrice: 4500,
+//     price: 40000,
+//     category: 'FOOD',
+//   },
+//   {
+//     name: 'Heniken',
+//     stock: 25,
+//     costPrice: 20000,
+//     price: 35000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Bia Hà Nội',
+//     stock: 25,
+//     costPrice: 20000,
+//     price: 30000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Bia Sài Gòn',
+//     stock: 25,
+//     costPrice: 20000,
+//     price: 30000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Sài Gòn bạc',
+//     stock: 13,
+//     costPrice: 13500,
+//     price: 30000,
+//     category: 'CIGARETTE',
+//   },
+//   {
+//     name: 'Ba số dẹt',
+//     stock: 17,
+//     costPrice: 13500,
+//     price: 30000,
+//     category: 'CIGARETTE',
+//   },
+//   {
+//     name: 'Kent bấm',
+//     stock: 19,
+//     costPrice: 20000,
+//     price: 30000,
+//     category: 'CIGARETTE',
+//   },
+//   {
+//     name: 'Bạc Xỉu',
+//     stock: 0,
+//     costPrice: 15000,
+//     price: 35000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Cafe Nâu',
+//     stock: 0,
+//     costPrice: 15000,
+//     price: 30000,
+//     category: 'BEVERAGE',
+//   },
+//   {
+//     name: 'Giờ chơi thường',
+//     stock: 0,
+//     costPrice: 0,
+//     price: 79000,
+//     category: 'SERVICE',
+//   },
+//   {
+//     name: 'Giờ chơi vip',
+//     stock: 0,
+//     costPrice: 0,
+//     price: 90000,
+//     category: 'SERVICE',
+//   },
+//   {
+//     name: 'Gậy thuê 50',
+//     stock: 0,
+//     costPrice: 0,
+//     price: 50000,
+//     category: 'EQUIPMENT',
+//   },
+//   {
+//     name: 'Gậy thuê 30',
+//     stock: 0,
+//     costPrice: 0,
+//     price: 50000,
+//     category: 'EQUIPMENT',
+//   },
+// ].map((product) => ({
+//   ...product,
+//   category: ProductCategory[product.category as keyof typeof ProductCategory],
+// }));
+
+// Table data
+const tables = [
+  {
+    tableNumber: 1,
+    tableName: 'Bàn 1',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 2,
+    tableName: 'Bàn 2',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 3,
+    tableName: 'Bàn 3',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 4,
+    tableName: 'Bàn 4',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 5,
+    tableName: 'Bàn 5',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 6,
+    tableName: 'Bàn 6',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 7,
+    tableName: 'Bàn 7',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 8,
+    tableName: 'Bàn 8',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 9,
+    tableName: 'Bàn 9',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 10,
+    tableName: 'Bàn 10',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 11,
+    tableName: 'Bàn 11',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 12,
+    tableName: 'Bàn 12',
+    hourlyRate: 79000,
+    status: 'AVAILABLE',
+  },
+  {
+    tableNumber: 13,
+    tableName: 'Bàn 13',
+    hourlyRate: 100000,
+    status: 'AVAILABLE',
+  },
+].map((table) => ({
+  ...table,
+  status: TableStatus[table.status as keyof typeof TableStatus],
+}));
+
+async function main() {
+  // await prisma.product.createMany({ data: products });
+  await prisma.table.createMany({ data: tables });
+  console.log('Seed dữ liệu thành công!');
+}
+
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import { Delete } from '@nestjs/common';
 import { Public } from '../auth/decorators/public.decorator';
 import { User } from '../auth/decorators/user.decorator';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { UserPaginationDto } from './dto/user-pagiation.dto';
 
 @Controller('users')
 export class UserController {
@@ -39,6 +41,14 @@ export class UserController {
   @Roles('ADMIN') // Chỉ ADMIN được truy cập
   getAllUsers() {
     return this.userService.getAllUsers();
+  }
+
+  // Paginate users (admin only)
+  @Get()
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN') // Chỉ ADMIN được truy cập
+  async findUserPagination(@Query() query: UserPaginationDto) {
+    return this.userService.paginate(query);
   }
 
   // Get user by ID (admin and Login-user)

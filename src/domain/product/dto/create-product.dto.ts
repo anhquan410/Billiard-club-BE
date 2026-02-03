@@ -1,47 +1,59 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+import { ProductCategory, ProductStatus } from '@prisma/client';
+import { Type } from 'class-transformer';
 import {
-  IsEnum,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
   IsString,
+  IsOptional,
+  IsNumber,
+  IsEnum,
+  Min,
   MaxLength,
 } from 'class-validator';
 
-export enum ProductCategory {
-  FOOD = 'FOOD',
-  BEVERAGE = 'BEVERAGE',
-  EQUIPMENT = 'EQUIPMENT',
-  OTHER = 'OTHER',
-}
-
 export class CreateProductDto {
   @IsString()
-  @IsNotEmpty()
-  @MaxLength(100)
+  @MaxLength(255)
   name: string;
 
-  @IsString()
   @IsOptional()
-  @MaxLength(500)
-  description: string;
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
 
   @IsEnum(ProductCategory)
-  @IsNotEmpty()
   category: ProductCategory;
 
-  @IsNumber()
-  @IsNotEmpty()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   price: number;
 
-  @IsNumber()
-  @IsNotEmpty()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   costPrice: number;
 
-  @IsString()
-  @IsNotEmpty()
-  unit: string;
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  stock?: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  minStock?: number;
 
   @IsString()
   @IsOptional()
-  imageUrl: string;
+  unit?: string; // Default là "cái" ở Prisma, có thể bỏ qua
+
+  @IsEnum(ProductStatus)
+  @IsOptional()
+  status?: ProductStatus; // Default là "AVAILABLE"
+
+  @IsString()
+  @IsOptional()
+  imageUrl?: string;
 }

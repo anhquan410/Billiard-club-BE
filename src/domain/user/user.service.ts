@@ -8,6 +8,7 @@ import * as bcrypt from 'bcrypt';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { UserPaginationDto } from './dto/user-pagiation.dto';
 
 @Injectable()
 export class UserService {
@@ -16,7 +17,7 @@ export class UserService {
   // Method to register a new user
   async register(data: CreateUserDto) {
     // Logic to create a new user in the database
-    const { email, fullName, password, role } = data;
+    const { email, fullName, password, role, phone } = data;
     const username = email.split('@')[0];
     const hashedPassword = await bcrypt.hash(password, 10);
     const isExistingUser = await this.databaseService.user.findUnique({
@@ -31,6 +32,7 @@ export class UserService {
         fullName,
         username,
         password: hashedPassword,
+        phone: phone,
         role, // Thêm role nếu có
       },
     });
@@ -64,6 +66,29 @@ export class UserService {
     return await this.databaseService.user.findMany();
   }
 
+  // Paginate users (for admin)
+  async paginate(query: UserPaginationDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+
+    const [items, total] = await Promise.all([
+      this.databaseService.user.findMany({
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: 'desc' }, // pagination stable
+      }),
+      this.databaseService.user.count(),
+    ]);
+
+    return {
+      items,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
   // Update user info
   async updateUser(id: string, data: UpdateUserDto) {
     return await this.databaseService.user.update({
@@ -93,6 +118,10 @@ export class UserService {
     }
     if (newPassword !== confirmNewPassword) {
       throw new BadRequestException('Mật khẩu mới không khớp');
+    }
+    const isChanged = await bcrypt.compare(newPassword, user.password);
+    if (isChanged) {
+      throw new BadRequestException('Mật khẩu mới phải khác mật khẩu cũ');
     }
     const hashedNewPassword = await bcrypt.hash(newPassword, 10);
     await this.databaseService.user.update({
