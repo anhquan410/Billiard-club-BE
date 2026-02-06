@@ -23,25 +23,124 @@
 
 ## Description
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+Backend API cho hệ thống quản lý câu lạc bộ bi-a, xây dựng với [NestJS](https://github.com/nestjs/nest) framework và Prisma ORM.
+
+## Prerequisites
+
+- Node.js (v18 trở lên)
+- PostgreSQL trên Neon (hoặc service tương tự)
+- npm hoặc yarn
 
 ## Project setup
 
+### 1. Clone repository và cài đặt dependencies
+
 ```bash
+# Clone repository
+$ git clone <repository-url>
+$ cd billiard-club-management-be
+
+# Cài đặt dependencies
 $ npm install
+```
+
+### 2. Cấu hình Database
+
+Tạo file `.env` ở thư mục root của project (copy từ `.env.example`):
+
+```bash
+$ cp .env.example .env
+```
+
+Cập nhật nội dung file `.env`:
+
+```env
+# Database - Lấy connection string từ Neon Dashboard
+DATABASE_URL="postgresql://username:password@ep-xxx.region.aws.neon.tech/dbname?sslmode=require"
+
+# JWT
+JWT_SECRET="your-secret-key-here"
+JWT_EXPIRES_IN="7d"
+
+# Server
+PORT=3000
+```
+
+**Lưu ý:** 
+- Lấy `DATABASE_URL` từ Neon Dashboard (Project Settings → Connection String)
+- Thay `JWT_SECRET` bằng một chuỗi secret key mạnh
+
+### 3. Setup Database
+
+```bash
+# Chạy migrations để tạo các bảng trên Neon
+$ npx prisma migrate deploy
+
+# Hoặc nếu đang development
+$ npx prisma migrate dev
+```
+
+### 4. Generate Prisma Client
+
+```bash
+$ npx prisma generate
 ```
 
 ## Compile and run the project
 
 ```bash
-# development
+# development mode
 $ npm run start
 
-# watch mode
+# watch mode (recommended for development)
 $ npm run start:dev
 
 # production mode
 $ npm run start:prod
+```
+
+Server sẽ chạy tại `http://localhost:3000`
+
+## API Endpoints Overview
+
+### Authentication
+- `POST /auth/login` - Đăng nhập
+- `POST /auth/register` - Đăng ký
+
+### Users
+- `GET /users/all` - Lấy danh sách users (phân trang)
+- `GET /users/:id` - Lấy thông tin user
+- `POST /users` - Tạo user mới
+- `PUT /users/:id` - Cập nhật user
+- `DELETE /users/:id` - Xóa user
+
+### Tables
+- `GET /tables/all` - Lấy danh sách bàn
+- `GET /tables/:id` - Lấy thông tin bàn
+- `GET /tables/:id/active-session` - Lấy session đang active
+- `POST /tables/:id/start-session` - Bật bàn
+- `POST /tables/:id/calculate-payment` - Tính tiền preview
+- `POST /tables/:id/end-session` - Thanh toán & tắt bàn
+
+### Products
+- `GET /products/all` - Lấy danh sách sản phẩm (phân trang)
+- `POST /products` - Tạo sản phẩm mới
+- (các endpoints khác...)
+
+## Prisma Commands
+
+```bash
+# Mở Prisma Studio để quản lý database
+$ npx prisma studio
+
+# Tạo migration mới sau khi thay đổi schema
+$ npx prisma migrate dev --name description-of-changes
+
+# Reset database (xóa toàn bộ dữ liệu)
+$ npx prisma migrate reset
+
+# Format schema file
+$ npx prisma format
 ```
 
 ## Run tests

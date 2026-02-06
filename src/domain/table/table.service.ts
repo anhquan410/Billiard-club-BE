@@ -271,6 +271,21 @@ export class TableService {
       },
     });
 
+    // 6.1. Tạo OrderItem từ TableSessionService
+    if (session.services && session.services.length > 0) {
+      const orderItems = session.services.map((service) => ({
+        orderId: order.id,
+        productId: service.productId,
+        quantity: service.quantity,
+        price: service.price,
+        subtotal: service.subtotal,
+      }));
+
+      await this.databaseService.orderItem.createMany({
+        data: orderItems,
+      });
+    }
+
     // 7. Hoàn thành session + update Table trả trạng thái AVAILABLE
     await this.databaseService.tableSession.update({
       where: { id: session.id },

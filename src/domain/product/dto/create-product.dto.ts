@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import { ProductCategory, ProductStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {

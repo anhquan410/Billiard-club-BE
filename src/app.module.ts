@@ -7,6 +7,7 @@ import { AuthModule } from './domain/auth/auth.module';
 import { ProductModule } from './domain/product/product.module';
 import { TableModule } from './domain/table/table.module';
 import { TableSessionModule } from './domain/table-session/table-session.module';
+import { StockModule } from './domain/stock/stock-movement.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { TableSessionModule } from './domain/table-session/table-session.module'
     ProductModule,
     TableModule,
     TableSessionModule,
+    StockModule,
   ],
   controllers: [AppController],
   providers: [AppService],
