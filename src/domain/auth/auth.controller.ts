@@ -33,7 +33,7 @@ export class AuthController {
   // Get profile of logged-in user
   @Get('profile')
   getProfile(@User() user) {
-    // req.user đã được giải mã từ JWT token
+    // req.user is decoded from JWT token
     return user;
   }
 

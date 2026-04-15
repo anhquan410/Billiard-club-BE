@@ -3,7 +3,7 @@ import { StockMovementService } from './stock-movement.service';
 import { StockController } from './stock-movement.controller';
 
 @Module({
-  imports: [StockModule],
+  imports: [],
   controllers: [StockController],
   providers: [StockMovementService],
   exports: [StockMovementService],
