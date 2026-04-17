@@ -15,6 +15,7 @@ datasource db {
 
 enum UserRole {
   ADMIN
+  CASHIER
   STAFF
   CUSTOMER
 }
@@ -39,6 +40,7 @@ model User {
 
   // Relations
   createdOrders   Order[]         @relation("CreatedByUser")
+  openedSessions  TableSession[]  @relation("OpenedByCashier")
   handledSessions TableSession[]  @relation("HandledByStaff")
   stockMovements  StockMovement[] @relation("CreatedByUser")
 
@@ -79,7 +81,8 @@ enum SessionStatus {
 model TableSession {
   id         String        @id @default(uuid())
   tableId    String        @map("table_id")
-  staffId    String        @map("staff_id") // Nhân viên xử lý
+  cashierId  String        @map("cashier_id") // Thu ngân/Cashier mở bàn (tự động gắn khi bật bàn)
+  staffId    String?       @map("staff_id") // Nhân viên phục vụ thêm (tùy chọn, có thể thay đổi)
   startTime  DateTime      @default(now()) @map("start_time")
   endTime    DateTime?     @map("end_time")
   duration   Int?          @default(0) // Thời gian chơi (phút)
@@ -92,7 +95,8 @@ model TableSession {
 
   // Relations
   table    Table                 @relation(fields: [tableId], references: [id])
-  staff    User                  @relation("HandledByStaff", fields: [staffId], references: [id])
+  cashier  User                  @relation("OpenedByCashier", fields: [cashierId], references: [id])
+  staff    User?                 @relation("HandledByStaff", fields: [staffId], references: [id])
   services TableSessionService[]
   order    Order?
 
