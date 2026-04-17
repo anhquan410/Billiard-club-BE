@@ -5,10 +5,12 @@ import { StockMovementService } from './stock-movement.service';
 import { StockMovementPaginationDto } from './dto/stock-movement-pagination.dto';
 import { ImportStockMovementDto } from './dto/import-stock-movement.dto';
 import { User } from '../auth/decorators/user.decorator';
+import { ExportStockMovementDto } from './dto/export-stock-movement.dto';
 
 @Controller('stocks-movement')
 export class StockController {
   constructor(private readonly stockMovementService: StockMovementService) {}
+
   // get stock movement items
   @Get('')
   @UseGuards(RolesGuard)
@@ -30,6 +32,23 @@ export class StockController {
       productId,
       quantity,
       unitPrice,
+      staffId,
+      reason,
+    );
+  }
+
+  // export stock - xuất hàng
+  @Post('export')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'STAFF')
+  async exportStock(
+    @Body() body: ExportStockMovementDto,
+    @User('id') staffId: string,
+  ) {
+    const { productId, quantity, reason } = body;
+    return this.stockMovementService.exportStock(
+      productId,
+      quantity,
       staffId,
       reason,
     );

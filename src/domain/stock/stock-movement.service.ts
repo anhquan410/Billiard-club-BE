@@ -76,8 +76,10 @@ export class StockMovementService {
     const beforeStock = Number(product.stock);
     const afterStock = beforeStock + quantity;
     const totalValue = quantity * unitPrice;
-    const newCostPrice =
-      (Number(product.costPrice) * beforeStock + totalValue) / afterStock;
+    const newCostPrice = product.costPrice
+      .mul(beforeStock)
+      .plus(totalValue)
+      .div(afterStock);
 
     // 2. Thực hiện transaction để đảm bảo tính nhất quán
     const result = await this.databaseService.$transaction(async (tx) => {
@@ -101,6 +103,63 @@ export class StockMovementService {
           unitPrice,
           totalValue,
           reason: reason || 'Nhập hàng',
+          createdBy: staffId,
+        },
+        include: {
+          product: true,
+          user: { select: { fullName: true, email: true } },
+        },
+      });
+
+      return { stockMovement, updatedProduct };
+    });
+
+    return result;
+  }
+
+  // export stock - xuất hàng
+  async exportStock(
+    productId: string,
+    quantity: number,
+    staffId: string,
+    reason?: string,
+  ) {
+    // 1. Kiểm tra sản phẩm có tồn tại không
+    const product = await this.databaseService.product.findUnique({
+      where: { id: productId },
+    });
+    if (!product) {
+      throw new Error('Không tìm thấy sản phẩm!');
+    }
+
+    const beforeStock = Number(product.stock);
+    const totalValue = product.costPrice.mul(quantity);
+    const afterStock = beforeStock - quantity;
+    if (afterStock < 0) {
+      throw new Error('Số lượng xuất vượt quá tồn kho!');
+    }
+
+    // 2. Thực hiện transaction để đảm bảo tính nhất quán
+    const result = await this.databaseService.$transaction(async (tx) => {
+      // 2.1. Cập nhật tồn kho sản phẩm
+      const updatedProduct = await tx.product.update({
+        where: { id: productId },
+        data: {
+          stock: afterStock,
+        },
+      });
+
+      // 2.2. Tạo phiếu xuất kho (StockMovement)
+      const stockMovement = await tx.stockMovement.create({
+        data: {
+          productId,
+          type: 'EXPORT',
+          quantity,
+          beforeStock,
+          afterStock,
+          unitPrice: product.costPrice,
+          totalValue,
+          reason: reason || 'Xuất hàng',
           createdBy: staffId,
         },
         include: {
