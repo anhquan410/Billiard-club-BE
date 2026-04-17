@@ -8,6 +8,8 @@ import { ProductModule } from './domain/product/product.module';
 import { TableModule } from './domain/table/table.module';
 import { TableSessionModule } from './domain/table-session/table-session.module';
 import { StockModule } from './domain/stock/stock-movement.module';
+import { OrderModule } from './domain/order/order.module';
+import { WebSocketModule } from './websocket/websocket.module';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { StockModule } from './domain/stock/stock-movement.module';
     TableModule,
     TableSessionModule,
     StockModule,
+    OrderModule,
+    WebSocketModule,
   ],
   controllers: [AppController],
   providers: [AppService],

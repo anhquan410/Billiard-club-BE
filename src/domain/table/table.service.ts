@@ -5,10 +5,14 @@ import {
 } from '@nestjs/common';
 import { PaymentMethod, SessionStatus, TableStatus } from '@prisma/client';
 import { DatabaseService } from 'src/database/database.service';
+import { BilliardWebSocketGateway } from 'src/websocket/websocket.gateway';
 
 @Injectable()
 export class TableService {
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly webSocketGateway: BilliardWebSocketGateway,
+  ) {}
 
   // Lấy tất cả bàn
   async getAllTables() {
@@ -188,7 +192,15 @@ export class TableService {
       data: { status: TableStatus.OCCUPIED },
     });
 
-    // 4. Trả về session mới và trạng thái bàn hiện tại
+    // 4. Emit WebSocket event - bàn đã được bật
+    this.webSocketGateway.emitTableStarted({
+      tableId: table.id,
+      tableNumber: table.tableNumber,
+      status: TableStatus.OCCUPIED,
+      sessionId: session.id,
+    });
+
+    // 5. Trả về session mới và trạng thái bàn hiện tại
     return {
       message: 'Bàn đã được bật & bắt đầu tính giờ',
       sessionId: session.id,
@@ -300,6 +312,13 @@ export class TableService {
     await this.databaseService.table.update({
       where: { id: table.id },
       data: { status: 'AVAILABLE' },
+    });
+
+    // 8. Emit WebSocket event - bàn đã được tắt
+    this.webSocketGateway.emitTableEnded({
+      tableId: table.id,
+      tableNumber: table.tableNumber,
+      status: TableStatus.AVAILABLE,
     });
 
     // Sau khi cập nhật hóa đơn, session, table

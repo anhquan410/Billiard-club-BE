@@ -6,7 +6,7 @@ export const User = createParamDecorator(
     const request = ctx.switchToHttp().getRequest<Request>();
     const user = request.user;
 
-    // Nếu có truyền field cụ thể (VD: 'id', 'email'), trả về field đó
+    // Nếu có truyền field cụ thể ('id', 'email'), trả về field đó
     if (data && user && typeof user === 'object') {
       return user[data as keyof typeof user];
     }
