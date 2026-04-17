@@ -51,6 +51,14 @@ export class TableService {
             product: true, // Lấy thông tin sản phẩm nếu có
           },
         },
+        cashier: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            role: true,
+          },
+        },
         staff: {
           select: {
             id: true,
@@ -161,8 +169,8 @@ export class TableService {
     };
   }
 
-  // Bật bàn (bắt đầu phiên chơi)
-  async startSession(tableId: string, staffId: string, note?: string) {
+  // Bật bàn (bắt đầu phiên chơi) - cashierId là tài khoản đang đăng nhập (tự động gắn)
+  async startSession(tableId: string, cashierId: string, note?: string) {
     // 1. Kiểm tra bàn có tồn tại và đang AVAILABLE không
     const table = await this.databaseService.table.findUnique({
       where: { id: tableId },
@@ -171,28 +179,30 @@ export class TableService {
     if (table.status !== TableStatus.AVAILABLE)
       throw new BadRequestException('Bàn này hiện không sẵn sàng!');
 
-    // 2. Tạo session mới
+    // 2. Kiểm tra cashier tồn tại
+    const cashier = await this.databaseService.user.findUnique({
+      where: { id: cashierId },
+    });
+    if (!cashier) throw new BadRequestException('Không tìm thấy tài khoản cashier!');
+
+    // 3. Tạo session mới với cashierId (tự động gắn), staffId để trống
     const session = await this.databaseService.tableSession.create({
       data: {
         tableId: table.id,
-        staffId,
+        cashierId,
         note,
         startTime: new Date(),
-        status: SessionStatus.ACTIVE, // Có thể là enum SessionStatus
+        status: SessionStatus.ACTIVE,
       },
     });
 
-    // 3. Lấy thông tin staff (nếu cần)
-    const staff = await this.databaseService.user.findUnique({
-      where: { id: staffId },
-    });
-    // 3. Update bàn sang trạng thái OCCUPIED
+    // 4. Update bàn sang trạng thái OCCUPIED
     await this.databaseService.table.update({
       where: { id: table.id },
       data: { status: TableStatus.OCCUPIED },
     });
 
-    // 4. Emit WebSocket event - bàn đã được bật
+    // 5. Emit WebSocket event - bàn đã được bật
     this.webSocketGateway.emitTableStarted({
       tableId: table.id,
       tableNumber: table.tableNumber,
@@ -200,14 +210,65 @@ export class TableService {
       sessionId: session.id,
     });
 
-    // 5. Trả về session mới và trạng thái bàn hiện tại
+    // 6. Trả về session mới và trạng thái bàn hiện tại
     return {
       message: 'Bàn đã được bật & bắt đầu tính giờ',
       sessionId: session.id,
       table: table,
       session,
-      staff,
+      cashier,
     };
+  }
+
+  // Gắn nhân viên phục vụ vào phiên chơi (Admin hoặc Cashier đều làm được)
+  async assignStaff(sessionId: string, staffId: string | null) {
+    const session = await this.databaseService.tableSession.findUnique({
+      where: { id: sessionId },
+    });
+    if (!session || session.status !== 'ACTIVE')
+      throw new BadRequestException('Session không hợp lệ hoặc đã kết thúc!');
+
+    if (staffId) {
+      const staff = await this.databaseService.user.findUnique({
+        where: { id: staffId },
+      });
+      if (!staff) throw new BadRequestException('Nhân viên không tồn tại!');
+    }
+
+    return this.databaseService.tableSession.update({
+      where: { id: sessionId },
+      data: { staffId },
+      include: {
+        cashier: { select: { id: true, fullName: true, role: true } },
+        staff: { select: { id: true, fullName: true, role: true } },
+      },
+    });
+  }
+
+  // Thay đổi cashier gắn với phiên chơi (Chỉ Admin mới làm được)
+  async changeCashier(sessionId: string, cashierId: string) {
+    const session = await this.databaseService.tableSession.findUnique({
+      where: { id: sessionId },
+    });
+    if (!session || session.status !== 'ACTIVE')
+      throw new BadRequestException('Session không hợp lệ hoặc đã kết thúc!');
+
+    const cashier = await this.databaseService.user.findUnique({
+      where: { id: cashierId },
+    });
+    if (!cashier || (cashier.role !== 'CASHIER' && cashier.role !== 'ADMIN'))
+      throw new BadRequestException(
+        'Người dùng phải có role CASHIER hoặc ADMIN!',
+      );
+
+    return this.databaseService.tableSession.update({
+      where: { id: sessionId },
+      data: { cashierId },
+      include: {
+        cashier: { select: { id: true, fullName: true, role: true } },
+        staff: { select: { id: true, fullName: true, role: true } },
+      },
+    });
   }
 
   // Thanh toán & tắt bàn
@@ -269,7 +330,7 @@ export class TableService {
     const order = await this.databaseService.order.create({
       data: {
         sessionId: session.id,
-        createdBy: session.staffId,
+        createdBy: session.cashierId,
         subtotal: subtotal,
         discount: discount,
         tax: 0, // Nếu có VAT bổ sung sau
@@ -363,7 +424,7 @@ export class TableService {
             unitPrice: service.price,
             totalValue: Number(service.quantity) * Number(service.price),
             reason: 'Bán sản phẩm qua bàn chơi',
-            createdBy: session.staffId,
+            createdBy: session.cashierId,
           },
         });
       }

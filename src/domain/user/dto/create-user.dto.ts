@@ -7,8 +7,9 @@ import {
 } from 'class-validator';
 
 export enum UserRole {
-  STAFF = 'STAFF',
   ADMIN = 'ADMIN',
+  CASHIER = 'CASHIER',
+  STAFF = 'STAFF',
   CUSTOMER = 'CUSTOMER',
 }
 
@@ -16,16 +17,16 @@ export class CreateUserDto {
   @IsNotEmpty()
   @IsString()
   @MaxLength(40)
-  email: string;
+  email!: string;
 
   @IsNotEmpty()
   @IsString()
   @MaxLength(30)
-  fullName: string;
+  fullName!: string;
 
   @IsNotEmpty()
   @IsString()
-  password: string;
+  password!: string;
 
   @IsEnum(UserRole)
   @IsOptional()

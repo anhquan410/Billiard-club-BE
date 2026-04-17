@@ -12,7 +12,7 @@ import {
 export class CreateProductDto {
   @IsString()
   @MaxLength(255)
-  name: string;
+  name!: string;
 
   @IsOptional()
   @IsString()
@@ -20,17 +20,17 @@ export class CreateProductDto {
   description?: string;
 
   @IsEnum(ProductCategory)
-  category: ProductCategory;
+  category!: ProductCategory;
 
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  price: number;
+  price!: number;
 
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  costPrice: number;
+  costPrice!: number;
 
   @Type(() => Number)
   @IsNumber()
