@@ -8,12 +8,14 @@ import {
   Patch,
   UseGuards,
   Query,
+  UploadedFile,
 } from '@nestjs/common';
 import { ProductService } from './product.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { ProductPaginationDto } from './dto/product-pagination.dto';
+import { ProductImageUpload } from './decorators/product-image-upload.decorator';
 
 @Controller('products')
 export class ProductController {
@@ -40,7 +42,16 @@ export class ProductController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles('ADMIN') // Chỉ ADMIN được tạo sản phẩm
-  async createProduct(@Body() data: CreateProductDto) {
+  @ProductImageUpload()
+  async createProduct(
+    @Body() data: CreateProductDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    // If file is uploaded, set imageUrl to file path
+    if (file) {
+      data.imageUrl = `/uploads/${file.filename}`;
+    }
+
     const product = await this.productService.createProduct(data);
     return product;
   }
@@ -58,10 +69,17 @@ export class ProductController {
   @Patch(':productId')
   @UseGuards(RolesGuard)
   @Roles('ADMIN') // Chỉ ADMIN được cập nhật sản phẩm
+  @ProductImageUpload()
   async updateProductById(
     @Param('productId') productId: string,
     @Body() data: CreateProductDto,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
+    // If file is uploaded, set imageUrl to file path
+    if (file) {
+      data.imageUrl = `/uploads/${file.filename}`;
+    }
+
     const updatedProduct = await this.productService.updateProductById(
       productId,
       data,

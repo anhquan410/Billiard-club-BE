@@ -3,6 +3,11 @@
 /node_modules
 /build
 
+# Uploads
+/uploads
+uploads/*
+!uploads/.gitkeep
+
 # Logs
 logs
 *.log

@@ -4,6 +4,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ProductPaginationDto } from './dto/product-pagination.dto';
+import { join } from 'path';
+import * as fs from 'fs';
 
 @Injectable()
 export class ProductService {
@@ -74,17 +76,63 @@ export class ProductService {
 
   // Update a product by ID
   async updateProductById(id: string, data: CreateProductDto) {
+    let oldImageUrl: string | null = null;
+
+    // If new image is uploaded, get current product to find old image
+    if (data.imageUrl) {
+      const currentProduct = await this.getProductById(id);
+      if (!currentProduct) {
+        throw new BadRequestException('Product not found');
+      }
+      oldImageUrl = currentProduct?.imageUrl;
+    }
+
     const updatedProduct = await this.databaseService.product.update({
       where: { id },
       data,
     });
+
+    // Delete old image file if new image was uploaded successfully
+    if (data.imageUrl && oldImageUrl && oldImageUrl !== data.imageUrl) {
+      this.deleteImageFile(oldImageUrl);
+    }
+
     return updatedProduct;
   }
 
   // Delete a product by ID
   async deleteProductById(productId: string) {
+    // Get product info before deleting to access image URL
+    const product = await this.getProductById(productId);
+
+    // Delete product from database
     await this.databaseService.product.delete({
       where: { id: productId },
     });
+
+    // Delete associated image file if exists
+    if (product?.imageUrl) {
+      this.deleteImageFile(product.imageUrl);
+    }
+  }
+
+  // Helper method to delete image file
+  private deleteImageFile(imageUrl: string): void {
+    try {
+      // Extract filename from imageUrl (e.g., "/uploads/product-123.jpg" -> "product-123.jpg")
+      const filename = imageUrl.split('/').pop();
+      if (filename) {
+        const filePath = join(process.cwd(), 'uploads', filename);
+
+        // Check if file exists before deleting
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.log(`[ProductService] Deleted image file: ${filename}`);
+        }
+      }
+    } catch (error) {
+      // Log error but don't throw - we don't want to fail the operation because of file deletion
+      console.error('[ProductService] Error deleting image file:', error);
+    }
   }
 }

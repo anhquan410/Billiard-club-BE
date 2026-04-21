@@ -54,5 +54,5 @@ export class CreateProductDto {
 
   @IsString()
   @IsOptional()
-  imageUrl?: string;
+  imageUrl?: string; // Sẽ được set tự động khi upload file
 }
