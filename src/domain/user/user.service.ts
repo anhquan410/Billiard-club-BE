@@ -50,7 +50,7 @@ export class UserService {
         fullName,
         username,
         password: hashedPassword,
-        phone: normalizedPhone,
+        phone: normalizedPhone || '', // Provide empty string if null
         role, // Thêm role nếu có
       },
     });
