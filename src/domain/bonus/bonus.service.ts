@@ -1,31 +1,35 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { MembershipTier, BonusTransactionType } from '@prisma/client';
-import { Decimal } from '@prisma/client/runtime/library';
 
 @Injectable()
 export class BonusService {
   constructor(private readonly databaseService: DatabaseService) {}
 
   // ==================== CONSTANTS ====================
-  
+
   private readonly POINTS_PER_VND = 10000; // 10,000 VNĐ = 1 điểm
-  private readonly VND_PER_POINT = 1000;   // 1 điểm = 1,000 VNĐ
-  
+  private readonly VND_PER_POINT = 1000; // 1 điểm = 1,000 VNĐ
+  private readonly MAX_DISCOUNT_PERCENTAGE = 0.3; // Tối đa 30% hóa đơn
+
   private readonly TIER_THRESHOLDS = {
-    [MembershipTier.BRONZE]: 500,     // 5%
-    [MembershipTier.SILVER]: 1000,    // 10%
-    [MembershipTier.GOLD]: 2000,      // 15%
-    [MembershipTier.PLATINUM]: 5000,  // 20%
-    [MembershipTier.DIAMOND]: 10000   // 25%
+    [MembershipTier.BRONZE]: 500, // 5%
+    [MembershipTier.SILVER]: 1000, // 10%
+    [MembershipTier.GOLD]: 2000, // 15%
+    [MembershipTier.PLATINUM]: 5000, // 20%
+    [MembershipTier.DIAMOND]: 10000, // 25%
   };
-  
+
   private readonly TIER_DISCOUNT_PERCENTAGES = {
-    [MembershipTier.BRONZE]: 0.05,    // 5%
-    [MembershipTier.SILVER]: 0.10,    // 10%
-    [MembershipTier.GOLD]: 0.15,      // 15%
-    [MembershipTier.PLATINUM]: 0.20,  // 20%
-    [MembershipTier.DIAMOND]: 0.25    // 25%
+    [MembershipTier.BRONZE]: 0.05, // 5%
+    [MembershipTier.SILVER]: 0.1, // 10%
+    [MembershipTier.GOLD]: 0.15, // 15%
+    [MembershipTier.PLATINUM]: 0.2, // 20%
+    [MembershipTier.DIAMOND]: 0.25, // 25%
   };
 
   // ==================== POINT CALCULATION ====================
@@ -42,6 +46,34 @@ export class BonusService {
    */
   calculateDiscountFromPoints(points: number): number {
     return points * this.VND_PER_POINT;
+  }
+
+  /**
+   * Tính số điểm tối đa có thể sử dụng (không vượt quá 30% hóa đơn)
+   */
+  calculateMaxUsablePoints(totalAmount: number, userPoints: number): number {
+    const maxDiscountAmount = Math.floor(
+      totalAmount * this.MAX_DISCOUNT_PERCENTAGE,
+    );
+    const maxPointsByAmount = Math.floor(
+      maxDiscountAmount / this.VND_PER_POINT,
+    );
+    return Math.min(userPoints, maxPointsByAmount);
+  }
+
+  /**
+   * Validate số điểm sử dụng không vượt quá giới hạn
+   */
+  validatePointUsage(pointsToUse: number, totalAmount: number): void {
+    const maxDiscountAmount = totalAmount * this.MAX_DISCOUNT_PERCENTAGE;
+    const requestedDiscountAmount = pointsToUse * this.VND_PER_POINT;
+
+    if (requestedDiscountAmount > maxDiscountAmount) {
+      throw new BadRequestException(
+        `Không thể sử dụng quá ${this.MAX_DISCOUNT_PERCENTAGE * 100}% giá trị hóa đơn. ` +
+          `Tối đa ${Math.floor(maxDiscountAmount / this.VND_PER_POINT)} điểm cho hóa đơn ${totalAmount.toLocaleString('vi-VN')} VNĐ`,
+      );
+    }
   }
 
   /**
@@ -89,7 +121,7 @@ export class BonusService {
         fullName: true,
         bonusPoints: true,
         membershipTier: true,
-      }
+      },
     });
 
     if (!user) {
@@ -98,9 +130,14 @@ export class BonusService {
 
     return {
       ...user,
-      tierDiscountPercentage: this.getTierDiscountPercentage(user.membershipTier),
+      tierDiscountPercentage: this.getTierDiscountPercentage(
+        user.membershipTier,
+      ),
       nextTierThreshold: this.getNextTierThreshold(user.membershipTier),
-      pointsToNextTier: this.getPointsToNextTier(user.bonusPoints, user.membershipTier)
+      pointsToNextTier: this.getPointsToNextTier(
+        user.bonusPoints,
+        user.membershipTier,
+      ),
     };
   }
 
@@ -110,7 +147,7 @@ export class BonusService {
   async updateUserTier(userId: string): Promise<MembershipTier> {
     const user = await this.databaseService.user.findUnique({
       where: { id: userId },
-      select: { bonusPoints: true, membershipTier: true }
+      select: { bonusPoints: true, membershipTier: true },
     });
 
     if (!user) {
@@ -118,11 +155,11 @@ export class BonusService {
     }
 
     const newTier = this.determineTier(user.bonusPoints);
-    
+
     if (newTier !== user.membershipTier) {
       await this.databaseService.user.update({
         where: { id: userId },
-        data: { membershipTier: newTier }
+        data: { membershipTier: newTier },
       });
     }
 
@@ -152,7 +189,10 @@ export class BonusService {
   /**
    * Tính số điểm cần thiết để lên hạng tiếp theo
    */
-  private getPointsToNextTier(currentPoints: number, currentTier: MembershipTier): number | null {
+  private getPointsToNextTier(
+    currentPoints: number,
+    currentTier: MembershipTier,
+  ): number | null {
     const nextThreshold = this.getNextTierThreshold(currentTier);
     if (!nextThreshold) {
       return null; // Đã đạt hạng cao nhất
@@ -165,9 +205,13 @@ export class BonusService {
   /**
    * Tích điểm cho user từ thanh toán
    */
-  async earnPoints(userId: string, orderId: string, finalAmount: number): Promise<void> {
+  async earnPoints(
+    userId: string,
+    orderId: string,
+    finalAmount: number,
+  ): Promise<void> {
     const pointsToEarn = this.calculatePointsFromAmount(finalAmount);
-    
+
     if (pointsToEarn <= 0) {
       return; // Không tích điểm nếu số tiền quá nhỏ
     }
@@ -177,9 +221,9 @@ export class BonusService {
       where: { id: userId },
       data: {
         bonusPoints: {
-          increment: pointsToEarn
-        }
-      }
+          increment: pointsToEarn,
+        },
+      },
     });
 
     // Tạo transaction history
@@ -189,8 +233,8 @@ export class BonusService {
         orderId,
         type: BonusTransactionType.EARNED,
         points: pointsToEarn,
-        description: `Tích ${pointsToEarn} điểm từ hóa đơn ${finalAmount.toLocaleString('vi-VN')} VNĐ`
-      }
+        description: `Tích ${pointsToEarn} điểm từ hóa đơn ${finalAmount.toLocaleString('vi-VN')} VNĐ`,
+      },
     });
 
     // Cập nhật hạng thành viên
@@ -200,10 +244,15 @@ export class BonusService {
   /**
    * Sử dụng điểm để giảm tiền
    */
-  async redeemPoints(userId: string, orderId: string, pointsToUse: number): Promise<number> {
+  async redeemPoints(
+    userId: string,
+    orderId: string,
+    pointsToUse: number,
+    totalAmount?: number,
+  ): Promise<number> {
     const user = await this.databaseService.user.findUnique({
       where: { id: userId },
-      select: { bonusPoints: true }
+      select: { bonusPoints: true },
     });
 
     if (!user) {
@@ -218,6 +267,11 @@ export class BonusService {
       throw new BadRequestException('Không đủ điểm để sử dụng');
     }
 
+    // Validate giới hạn 30% (nếu có totalAmount)
+    if (totalAmount) {
+      this.validatePointUsage(pointsToUse, totalAmount);
+    }
+
     const discountAmount = this.calculateDiscountFromPoints(pointsToUse);
 
     // Trừ điểm từ user
@@ -225,9 +279,9 @@ export class BonusService {
       where: { id: userId },
       data: {
         bonusPoints: {
-          decrement: pointsToUse
-        }
-      }
+          decrement: pointsToUse,
+        },
+      },
     });
 
     // Tạo transaction history
@@ -237,8 +291,8 @@ export class BonusService {
         orderId,
         type: BonusTransactionType.REDEEMED,
         points: -pointsToUse,
-        description: `Sử dụng ${pointsToUse} điểm để giảm ${discountAmount.toLocaleString('vi-VN')} VNĐ`
-      }
+        description: `Sử dụng ${pointsToUse} điểm để giảm ${discountAmount.toLocaleString('vi-VN')} VNĐ`,
+      },
     });
 
     // Cập nhật hạng thành viên (có thể bị giảm hạng)
@@ -259,25 +313,30 @@ export class BonusService {
         order: {
           select: {
             orderNumber: true,
-            total: true
-          }
-        }
-      }
+            total: true,
+          },
+        },
+      },
     });
   }
 
   /**
    * Admin điều chỉnh điểm thủ công
    */
-  async adjustPoints(userId: string, points: number, reason: string, adminId?: string): Promise<void> {
+  async adjustPoints(
+    userId: string,
+    points: number,
+    reason: string,
+    adminId?: string,
+  ): Promise<void> {
     // Cập nhật điểm cho user
     await this.databaseService.user.update({
       where: { id: userId },
       data: {
         bonusPoints: {
-          increment: points
-        }
-      }
+          increment: points,
+        },
+      },
     });
 
     // Tạo transaction history
@@ -286,8 +345,8 @@ export class BonusService {
         userId,
         type: BonusTransactionType.ADJUSTED,
         points,
-        description: `${adminId ? `Admin ${adminId}` : 'Hệ thống'} điều chỉnh: ${reason}`
-      }
+        description: `${adminId ? `Admin ${adminId}` : 'Hệ thống'} điều chỉnh: ${reason}`,
+      },
     });
 
     // Cập nhật hạng thành viên
@@ -303,7 +362,7 @@ export class BonusService {
     userId: string,
     originalAmount: number,
     usePoints?: number,
-    useTierDiscount?: boolean
+    useTierDiscount?: boolean,
   ): Promise<{
     pointsDiscount: number;
     tierDiscount: number;
@@ -314,7 +373,7 @@ export class BonusService {
   }> {
     const user = await this.databaseService.user.findUnique({
       where: { id: userId },
-      select: { bonusPoints: true, membershipTier: true }
+      select: { bonusPoints: true, membershipTier: true },
     });
 
     if (!user) {
@@ -334,15 +393,20 @@ export class BonusService {
 
     // Tính giảm giá từ hạng (chỉ khi không dùng điểm)
     if (useTierDiscount && (!usePoints || usePoints === 0)) {
-      tierDiscount = this.calculateTierDiscount(user.membershipTier, originalAmount);
+      tierDiscount = this.calculateTierDiscount(
+        user.membershipTier,
+        originalAmount,
+      );
     }
 
     const totalDiscount = pointsDiscount + tierDiscount;
     const finalAmount = Math.max(0, originalAmount - totalDiscount);
 
-    // Tính số điểm tối đa có thể dùng (không vượt quá giá trị đơn hàng)
-    const maxPointsByAmount = Math.floor(originalAmount / this.VND_PER_POINT);
-    const maxUsablePoints = Math.min(user.bonusPoints, maxPointsByAmount);
+    // Tính số điểm tối đa có thể dùng (giới hạn 30% + số điểm user có)
+    const maxUsablePoints = this.calculateMaxUsablePoints(
+      originalAmount,
+      user.bonusPoints,
+    );
 
     return {
       pointsDiscount,
@@ -350,7 +414,7 @@ export class BonusService {
       totalDiscount,
       finalAmount,
       canUsePoints: user.bonusPoints > 0,
-      maxUsablePoints
+      maxUsablePoints,
     };
   }
 }
