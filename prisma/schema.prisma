@@ -26,23 +26,40 @@ enum UserStatus {
   SUSPENDED
 }
 
+enum MembershipTier {
+  BRONZE    // 500 điểm - 5%
+  SILVER    // 1000 điểm - 10%
+  GOLD      // 2000 điểm - 15%
+  PLATINUM  // 5000 điểm - 20%
+  DIAMOND   // 10000 điểm - 25%
+}
+
+enum BonusTransactionType {
+  EARNED    // Tích điểm từ thanh toán
+  REDEEMED  // Tiêu điểm giảm tiền
+  ADJUSTED  // Điều chỉnh thủ công
+}
+
 model User {
-  id        String     @id @default(uuid())
-  username  String     @unique
-  email     String     @unique
-  password  String
-  fullName  String     @map("full_name")
-  phone     String?
-  role      UserRole   @default(CUSTOMER)
-  status    UserStatus @default(ACTIVE)
-  createdAt DateTime   @default(now()) @map("created_at")
-  updatedAt DateTime   @updatedAt @map("updated_at")
+  id             String         @id @default(uuid())
+  username       String         @unique
+  email          String         @unique
+  password       String
+  fullName       String         @map("full_name")
+  phone          String         @unique
+  role           UserRole       @default(CUSTOMER)
+  status         UserStatus     @default(ACTIVE)
+  bonusPoints    Int            @default(0) @map("bonus_points")
+  membershipTier MembershipTier @default(BRONZE) @map("membership_tier")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
 
   // Relations
-  createdOrders   Order[]         @relation("CreatedByUser")
-  openedSessions  TableSession[]  @relation("OpenedByCashier")
-  handledSessions TableSession[]  @relation("HandledByStaff")
-  stockMovements  StockMovement[] @relation("CreatedByUser")
+  createdOrders     Order[]            @relation("CreatedByUser")
+  openedSessions    TableSession[]     @relation("OpenedByCashier")
+  handledSessions   TableSession[]     @relation("HandledByStaff")
+  stockMovements    StockMovement[]    @relation("CreatedByUser")
+  bonusTransactions BonusTransaction[]
 
   @@map("users")
 }
@@ -206,26 +223,31 @@ enum PaymentMethod {
 }
 
 model Order {
-  id            String        @id @default(uuid())
-  orderNumber   String        @unique @map("order_number") // Mã hóa đơn:  HD001, HD002... 
-  sessionId     String?       @unique @map("session_id") // Liên kết với session bàn (nếu có)
-  customerId    String?       @map("customer_id")
-  createdBy     String        @map("created_by") // Staff tạo hóa đơn
-  subtotal      Decimal       @db.Decimal(10, 2) // Tổng tiền hàng
-  discount      Decimal       @default(0) @db.Decimal(10, 2) // Giảm giá
-  tax           Decimal       @default(0) @db.Decimal(10, 2) // Thuế (nếu có)
-  total         Decimal       @db.Decimal(10, 2) // Tổng thanh toán
-  paymentMethod PaymentMethod @map("payment_method")
-  status        OrderStatus   @default(PENDING)
-  paidAt        DateTime?     @map("paid_at")
-  note          String?
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
+  id                 String        @id @default(uuid())
+  orderNumber        String        @unique @map("order_number") // Mã hóa đơn:  HD001, HD002... 
+  sessionId          String?       @unique @map("session_id") // Liên kết với session bàn (nếu có)
+  customerId         String?       @map("customer_id")
+  createdBy          String        @map("created_by") // Staff tạo hóa đơn
+  subtotal           Decimal       @db.Decimal(10, 2) // Tổng tiền hàng
+  discount           Decimal       @default(0) @db.Decimal(10, 2) // Giảm giá
+  tax                Decimal       @default(0) @db.Decimal(10, 2) // Thuế (nếu có)
+  total              Decimal       @db.Decimal(10, 2) // Tổng thanh toán
+  bonusPointsEarned  Int           @default(0) @map("bonus_points_earned") // Điểm tích được
+  bonusPointsUsed    Int           @default(0) @map("bonus_points_used") // Điểm đã dùng
+  discountFromTier   Decimal       @default(0) @map("discount_from_tier") @db.Decimal(10, 2) // Giảm giá từ hạng
+  discountFromPoints Decimal       @default(0) @map("discount_from_points") @db.Decimal(10, 2) // Giảm giá từ điểm
+  paymentMethod      PaymentMethod @map("payment_method")
+  status             OrderStatus   @default(PENDING)
+  paidAt             DateTime?     @map("paid_at")
+  note               String?
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
 
   // Relations
-  session  TableSession? @relation(fields: [sessionId], references: [id])
-  customer User?         @relation("CreatedByUser", fields: [customerId], references: [id])
-  items    OrderItem[]
+  session           TableSession?      @relation(fields: [sessionId], references: [id])
+  customer          User?              @relation("CreatedByUser", fields: [customerId], references: [id])
+  items             OrderItem[]
+  bonusTransactions BonusTransaction[]
 
   @@map("orders")
 }
@@ -243,6 +265,24 @@ model OrderItem {
   product Product @relation(fields: [productId], references: [id])
 
   @@map("order_items")
+}
+
+// ==================== BONUS POINT SYSTEM ====================
+
+model BonusTransaction {
+  id          String              @id @default(uuid())
+  userId      String              @map("user_id")
+  orderId     String?             @map("order_id") // Liên kết với hóa đơn (nếu có)
+  type        BonusTransactionType
+  points      Int                 // + là tích điểm, - là tiêu điểm
+  description String
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  // Relations
+  user  User   @relation(fields: [userId], references: [id])
+  order Order? @relation(fields: [orderId], references: [id])
+
+  @@map("bonus_transactions")
 }
 
 // ==================== REPORTS (Optional - có thể tính toán từ Orders) ====================

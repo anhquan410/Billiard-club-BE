@@ -9,6 +9,7 @@ import { TableModule } from './domain/table/table.module';
 import { TableSessionModule } from './domain/table-session/table-session.module';
 import { StockModule } from './domain/stock/stock-movement.module';
 import { OrderModule } from './domain/order/order.module';
+import { BonusModule } from './domain/bonus/bonus.module';
 import { WebSocketModule } from './websocket/websocket.module';
 
 @Module({
@@ -21,6 +22,7 @@ import { WebSocketModule } from './websocket/websocket.module';
     TableSessionModule,
     StockModule,
     OrderModule,
+    BonusModule,
     WebSocketModule,
   ],
   controllers: [AppController],
