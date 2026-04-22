@@ -32,7 +32,7 @@ model User {
   email     String     @unique
   password  String
   fullName  String     @map("full_name")
-  phone     String?
+  phone     String     @unique
   role      UserRole   @default(CUSTOMER)
   status    UserStatus @default(ACTIVE)
   createdAt DateTime   @default(now()) @map("created_at")

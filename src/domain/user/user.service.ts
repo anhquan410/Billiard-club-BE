@@ -9,6 +9,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UserPaginationDto } from './dto/user-pagiation.dto';
+import { AuthUtils } from '../auth/utils/auth.utils';
 
 @Injectable()
 export class UserService {
@@ -20,19 +21,36 @@ export class UserService {
     const { email, fullName, password, role, phone } = data;
     const username = email.split('@')[0];
     const hashedPassword = await bcrypt.hash(password, 10);
-    const isExistingUser = await this.databaseService.user.findUnique({
-      where: { email },
+
+    // Chuẩn hóa số điện thoại nếu có
+    const normalizedPhone = phone ? AuthUtils.normalizePhone(phone) : null;
+
+    // Kiểm tra user đã tồn tại
+    const isExistingUser = await this.databaseService.user.findFirst({
+      where: {
+        OR: [
+          { email },
+          ...(normalizedPhone ? [{ phone: normalizedPhone }] : []),
+        ],
+      },
     });
+
     if (isExistingUser) {
-      throw new BadRequestException('User with this email already exists');
+      if (isExistingUser.email === email) {
+        throw new BadRequestException('Email đã được sử dụng');
+      }
+      if (normalizedPhone && isExistingUser.phone === normalizedPhone) {
+        throw new BadRequestException('Số điện thoại đã được sử dụng');
+      }
     }
+
     const newUser = await this.databaseService.user.create({
       data: {
         email,
         fullName,
         username,
         password: hashedPassword,
-        phone: phone,
+        phone: normalizedPhone,
         role, // Thêm role nếu có
       },
     });
@@ -47,6 +65,24 @@ export class UserService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
+    return user;
+  }
+
+  // Find user by email or phone for login
+  async findByEmailOrPhone(emailOrPhone: string) {
+    const inputType = AuthUtils.getInputType(emailOrPhone);
+    const normalizedInput =
+      inputType === 'phone'
+        ? AuthUtils.normalizePhone(emailOrPhone)
+        : emailOrPhone;
+
+    const user = await this.databaseService.user.findFirst({
+      where:
+        inputType === 'email'
+          ? { email: normalizedInput }
+          : { phone: normalizedInput },
+    });
+
     return user;
   }
 

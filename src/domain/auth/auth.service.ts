@@ -20,19 +20,24 @@ export class AuthService {
   ) {}
 
   /**
-   * Login user
+   * Xác thực user bằng email hoặc số điện thoại
    */
   async validateUser(data: LoginUserDto): Promise<any> {
-    const { email, password } = data;
-    const user = await this.userService.findOne(email);
+    const { emailOrPhone, password } = data;
+
+    const user = await this.userService.findByEmailOrPhone(emailOrPhone);
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(
+        'Không tìm thấy tài khoản với email hoặc số điện thoại này',
+      );
     }
+
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid password');
+      throw new UnauthorizedException('Mật khẩu không chính xác');
     }
+
     const { password: _, ...result } = user;
     return result;
   }
