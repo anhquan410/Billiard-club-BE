@@ -27,17 +27,17 @@ enum UserStatus {
 }
 
 enum MembershipTier {
-  BRONZE    // 500 điểm - 5%
-  SILVER    // 1000 điểm - 10%
-  GOLD      // 2000 điểm - 15%
-  PLATINUM  // 5000 điểm - 20%
-  DIAMOND   // 10000 điểm - 25%
+  BRONZE // 500 điểm - 5%
+  SILVER // 1000 điểm - 10%
+  GOLD // 2000 điểm - 15%
+  PLATINUM // 5000 điểm - 20%
+  DIAMOND // 10000 điểm - 25%
 }
 
 enum BonusTransactionType {
-  EARNED    // Tích điểm từ thanh toán
-  REDEEMED  // Tiêu điểm giảm tiền
-  ADJUSTED  // Điều chỉnh thủ công
+  EARNED // Tích điểm từ thanh toán
+  REDEEMED // Tiêu điểm giảm tiền
+  ADJUSTED // Điều chỉnh thủ công
 }
 
 model User {
@@ -51,6 +51,7 @@ model User {
   status         UserStatus     @default(ACTIVE)
   bonusPoints    Int            @default(0) @map("bonus_points")
   membershipTier MembershipTier @default(BRONZE) @map("membership_tier")
+  refreshToken   String?        @map("refresh_token")
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt @map("updated_at")
 
@@ -60,6 +61,7 @@ model User {
   handledSessions   TableSession[]     @relation("HandledByStaff")
   stockMovements    StockMovement[]    @relation("CreatedByUser")
   bonusTransactions BonusTransaction[]
+  notifications     Notification[]
 
   @@map("users")
 }
@@ -270,13 +272,13 @@ model OrderItem {
 // ==================== BONUS POINT SYSTEM ====================
 
 model BonusTransaction {
-  id          String              @id @default(uuid())
-  userId      String              @map("user_id")
-  orderId     String?             @map("order_id") // Liên kết với hóa đơn (nếu có)
+  id          String               @id @default(uuid())
+  userId      String               @map("user_id")
+  orderId     String?              @map("order_id") // Liên kết với hóa đơn (nếu có)
   type        BonusTransactionType
-  points      Int                 // + là tích điểm, - là tiêu điểm
+  points      Int // + là tích điểm, - là tiêu điểm
   description String
-  createdAt   DateTime            @default(now()) @map("created_at")
+  createdAt   DateTime             @default(now()) @map("created_at")
 
   // Relations
   user  User   @relation(fields: [userId], references: [id])
@@ -299,4 +301,26 @@ model DailyReport {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("daily_reports")
+}
+
+// ==================== NOTIFICATION ====================
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  message   String
+  type      NotificationType
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+enum NotificationType {
+  USER
+  STAFF
+  ADMIN
+  CASHIER
 }

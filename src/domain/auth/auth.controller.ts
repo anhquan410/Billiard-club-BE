@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
@@ -43,5 +44,19 @@ export class AuthController {
   logout() {
     // Với JWT, chỉ cần client xóa token. Server trả về thông báo thành công.
     return { message: 'Logout successful' };
+  }
+
+  // Refresh token
+  @HttpCode(HttpStatus.OK)
+  @Public()
+  @Post('refresh-token')
+  async refreshToken(@Body('refresh_token') refreshToken: string) {
+    // Logic để xác thực refresh token và cấp mới access token
+    const user = await this.authService.validateRefreshToken(refreshToken);
+    if (!user) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+    // Nếu valid, trả về access token mới
+    return this.authService.login(user);
   }
 }
