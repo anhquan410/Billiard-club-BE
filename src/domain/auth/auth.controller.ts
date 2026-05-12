@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -41,8 +42,9 @@ export class AuthController {
   // Logout user
   @HttpCode(HttpStatus.OK)
   @Post('logout')
-  logout() {
-    // Với JWT, chỉ cần client xóa token. Server trả về thông báo thành công.
+  async logout(@User() user) {
+    // Xóa refreshToken trong DB khi logout
+    await this.authService.logout(user.id);
     return { message: 'Logout successful' };
   }
 

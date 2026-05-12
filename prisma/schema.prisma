@@ -51,7 +51,7 @@ model User {
   status         UserStatus     @default(ACTIVE)
   bonusPoints    Int            @default(0) @map("bonus_points")
   membershipTier MembershipTier @default(BRONZE) @map("membership_tier")
-  refreshToken   String?        @map("refresh_token")
+  refreshToken   String?        @default("") @map("refresh_token")
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt @map("updated_at")
 
@@ -100,7 +100,7 @@ enum SessionStatus {
 model TableSession {
   id         String        @id @default(uuid())
   tableId    String        @map("table_id")
-  cashierId  String        @map("cashier_id") // Thu ngân/Cashier mở bàn (tự động gắn khi bật bàn)
+  cashierId  String?       @map("cashier_id") // Thu ngân/Cashier mở bàn (tự động gắn khi bật bàn)
   staffId    String?       @map("staff_id") // Nhân viên phục vụ thêm (tùy chọn, có thể thay đổi)
   startTime  DateTime      @default(now()) @map("start_time")
   endTime    DateTime?     @map("end_time")
@@ -114,7 +114,7 @@ model TableSession {
 
   // Relations
   table    Table                 @relation(fields: [tableId], references: [id])
-  cashier  User                  @relation("OpenedByCashier", fields: [cashierId], references: [id])
+  cashier  User?                 @relation("OpenedByCashier", fields: [cashierId], references: [id])
   staff    User?                 @relation("HandledByStaff", fields: [staffId], references: [id])
   services TableSessionService[]
   order    Order?

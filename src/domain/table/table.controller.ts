@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { TableService } from './table.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -33,16 +41,15 @@ export class TableController {
     return this.tableService.getActiveSession(tableId);
   }
 
-  // Bật bàn (bắt đầu phiên chơi) - cashierId tự động lấy từ JWT
+  // Bật bàn (bắt đầu phiên chơi)
   @Post(':id/start-session')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'CASHIER')
   async startSession(
     @Param('id') tableId: string,
-    @User('id') cashierId: string,
     @Body() body: { note?: string },
   ) {
-    return this.tableService.startSession(tableId, cashierId, body.note);
+    return this.tableService.startSession(tableId, body.note);
   }
 
   // Gắn nhân viên phục vụ vào phiên chơi (Admin hoặc Cashier)
@@ -84,6 +91,7 @@ export class TableController {
   @Roles('ADMIN', 'CASHIER')
   async endSession(
     @Param('id') tableId: string,
+    @User('id') userId: string,
     @Body()
     body: {
       paymentMethod: 'CASH' | 'BANK_TRANSFER' | 'MOMO' | 'VNPAY' | 'OTHER';
@@ -92,6 +100,6 @@ export class TableController {
       customerId?: string;
     },
   ) {
-    return this.tableService.endSession(tableId, body);
+    return this.tableService.endSession(tableId, userId, body);
   }
 }

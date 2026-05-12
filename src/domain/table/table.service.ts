@@ -6,12 +6,14 @@ import {
 import { PaymentMethod, SessionStatus, TableStatus } from '@prisma/client';
 import { DatabaseService } from 'src/database/database.service';
 import { BilliardWebSocketGateway } from 'src/websocket/websocket.gateway';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class TableService {
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly webSocketGateway: BilliardWebSocketGateway,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // Lấy tất cả bàn
@@ -169,8 +171,8 @@ export class TableService {
     };
   }
 
-  // Bật bàn (bắt đầu phiên chơi) - cashierId là tài khoản đang đăng nhập (tự động gắn)
-  async startSession(tableId: string, cashierId: string, note?: string) {
+  // Bật bàn (bắt đầu phiên chơi)
+  async startSession(tableId: string, note?: string) {
     // 1. Kiểm tra bàn có tồn tại và đang AVAILABLE không
     const table = await this.databaseService.table.findUnique({
       where: { id: tableId },
@@ -179,27 +181,27 @@ export class TableService {
     if (table.status !== TableStatus.AVAILABLE)
       throw new BadRequestException('Bàn này hiện không sẵn sàng!');
 
-    // 2. Kiểm tra cashier tồn tại
-    const cashier = await this.databaseService.user.findUnique({
-      where: { id: cashierId },
-    });
-    if (!cashier) throw new BadRequestException('Không tìm thấy tài khoản cashier!');
-
-    // 3. Tạo session mới với cashierId (tự động gắn), staffId để trống
+    // 2. Tạo session mới
     const session = await this.databaseService.tableSession.create({
       data: {
         tableId: table.id,
-        cashierId,
+        cashierId: 'system',
         note,
         startTime: new Date(),
         status: SessionStatus.ACTIVE,
       },
     });
 
-    // 4. Update bàn sang trạng thái OCCUPIED
+    // 3. Update bàn sang trạng thái OCCUPIED
     await this.databaseService.table.update({
       where: { id: table.id },
       data: { status: TableStatus.OCCUPIED },
+    });
+
+    // 4. Gửi thông báo
+    await this.notificationService.sendTableStartedNotification({
+      tableId: table.id,
+      tableNumber: table.tableNumber,
     });
 
     // 5. Emit WebSocket event - bàn đã được bật
@@ -216,7 +218,6 @@ export class TableService {
       sessionId: session.id,
       table: table,
       session,
-      cashier,
     };
   }
 
@@ -274,6 +275,7 @@ export class TableService {
   // Thanh toán & tắt bàn
   async endSession(
     tableId: string,
+    userId: string,
     body: {
       paymentMethod: PaymentMethod;
       discount?: number;
@@ -330,7 +332,7 @@ export class TableService {
     const order = await this.databaseService.order.create({
       data: {
         sessionId: session.id,
-        createdBy: session.cashierId,
+        createdBy: userId,
         subtotal: subtotal,
         discount: discount,
         tax: 0, // Nếu có VAT bổ sung sau
@@ -424,7 +426,7 @@ export class TableService {
             unitPrice: service.price,
             totalValue: Number(service.quantity) * Number(service.price),
             reason: 'Bán sản phẩm qua bàn chơi',
-            createdBy: session.cashierId,
+            createdBy: userId,
           },
         });
       }

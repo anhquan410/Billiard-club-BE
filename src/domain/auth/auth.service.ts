@@ -91,4 +91,11 @@ export class AuthService {
       return false;
     }
   }
+
+  /**
+   * Xóa refresh token khi logout
+   */
+  async logout(userId: string) {
+    await this.userService.updateUser(userId, { refreshToken: '' });
+  }
 }

@@ -12,6 +12,8 @@ import { OrderModule } from './domain/order/order.module';
 import { BonusModule } from './domain/bonus/bonus.module';
 import { WebSocketModule } from './websocket/websocket.module';
 
+import { NotificationModule } from './domain/notification/notification.module';
+
 @Module({
   imports: [
     DatabaseModule,
@@ -24,6 +26,7 @@ import { WebSocketModule } from './websocket/websocket.module';
     OrderModule,
     BonusModule,
     WebSocketModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
