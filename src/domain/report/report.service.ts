@@ -455,6 +455,7 @@ export class ReportService {
         tableFeeRevenue: number;
         productRevenue: number;
         totalRevenueAfterDiscount: number;
+        latestSessionEnd: Date | null;
       }
     >();
 
@@ -467,6 +468,7 @@ export class ReportService {
         tableFeeRevenue: 0,
         productRevenue: 0,
         totalRevenueAfterDiscount: 0,
+        latestSessionEnd: null,
       };
 
       const productRev = session.services.reduce(
@@ -484,6 +486,15 @@ export class ReportService {
       existing.tableFeeRevenue += tableFee;
       existing.productRevenue += productRev;
       existing.totalRevenueAfterDiscount += paidTotal;
+      if (session.endTime) {
+        const endedAt = new Date(session.endTime);
+        if (
+          !existing.latestSessionEnd ||
+          endedAt > existing.latestSessionEnd
+        ) {
+          existing.latestSessionEnd = endedAt;
+        }
+      }
       tableMap.set(session.tableId, existing);
     }
 
@@ -501,9 +512,14 @@ export class ReportService {
           productRevenue: Math.round(table.productRevenue),
           totalRevenue: Math.round(totalRevenue),
           totalRevenueAfterDiscount: Math.round(table.totalRevenueAfterDiscount),
+          latestSessionEnd: table.latestSessionEnd?.toISOString() ?? null,
         };
       })
-      .sort((a, b) => b.totalRevenueAfterDiscount - a.totalRevenueAfterDiscount);
+      .sort(
+        (a, b) =>
+          new Date(b.latestSessionEnd ?? 0).getTime() -
+          new Date(a.latestSessionEnd ?? 0).getTime(),
+      );
   }
 
   private async buildInventorySummary(from: Date, to: Date) {

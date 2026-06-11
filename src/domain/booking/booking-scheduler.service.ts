@@ -1,23 +1,10 @@
 /* eslint-disable prettier/prettier */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  isTransientDbError,
+  sleep,
+} from 'src/database/is-transient-db-error';
 import { BookingService, CHECKIN_GRACE_MINUTES } from './booking.service';
-
-function isTransientDbError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const code = (error as { code?: string }).code;
-  return (
-    code === 'ECONNRESET' ||
-    code === 'ETIMEDOUT' ||
-    code === 'ECONNREFUSED' ||
-    code === 'P1001' ||
-    code === 'P1002' ||
-    code === 'P1017'
-  );
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 @Injectable()
 export class BookingSchedulerService implements OnModuleInit {
@@ -35,6 +22,9 @@ export class BookingSchedulerService implements OnModuleInit {
 
   private async tick() {
     try {
+      await this.runWithDbRetry(() =>
+        this.bookingService.syncAllTableReservationStatuses(),
+      );
       const count = await this.runWithDbRetry(() =>
         this.bookingService.releaseExpiredNoShowBookings(),
       );

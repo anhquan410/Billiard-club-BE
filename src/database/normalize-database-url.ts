@@ -1,6 +1,8 @@
 /**
- * pg v8 cảnh báo khi dùng sslmode=require|prefer|verify-ca (sẽ đổi semantics ở pg v9).
- * Neon khuyến nghị SSL — chuẩn hóa sang verify-full để giữ hành vi hiện tại và hết warning.
+ * Chuẩn hóa DATABASE_URL cho pg + Neon:
+ * - sslmode verify-full (pg v8+)
+ * - connect_timeout cho cold start / mạng chậm
+ * - pgbouncer=true khi dùng Neon pooler endpoint
  */
 export function normalizeDatabaseUrl(connectionString: string): string {
   try {
@@ -14,6 +16,15 @@ export function normalizeDatabaseUrl(connectionString: string): string {
       sslmode === 'verify-ca'
     ) {
       url.searchParams.set('sslmode', 'verify-full');
+    }
+
+    if (!url.searchParams.has('connect_timeout')) {
+      url.searchParams.set('connect_timeout', '30');
+    }
+
+    const host = url.hostname.toLowerCase();
+    if (host.includes('neon.tech') && host.includes('-pooler')) {
+      url.searchParams.set('pgbouncer', 'true');
     }
 
     return url.toString();

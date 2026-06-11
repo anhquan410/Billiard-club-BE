@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
@@ -15,9 +16,22 @@ import { NotificationService } from '../notification/notification.service';
 import { BookingQueryDto } from './dto/booking-query.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { CustomerCreateBookingDto } from './dto/customer-create-booking.dto';
+import {
+  BOOKING_HOLD_MINUTES_BEFORE_START,
+  canCheckIn,
+  CHECKIN_EARLY_MINUTES,
+  CHECKIN_GRACE_MINUTES,
+  isBookingExpiredForNoShow,
+  isInHoldWindow,
+  parseBookingDateTime,
+  timeRangesOverlap,
+} from './booking-policy';
 
-/** Số phút sau giờ bắt đầu đặt bàn mà chưa check-in thì tự trả bàn */
-export const CHECKIN_GRACE_MINUTES = 30;
+export {
+  BOOKING_HOLD_MINUTES_BEFORE_START,
+  CHECKIN_EARLY_MINUTES,
+  CHECKIN_GRACE_MINUTES,
+};
 
 @Injectable()
 export class BookingService {
@@ -27,9 +41,7 @@ export class BookingService {
   ) {}
 
   /**
-   * Đặt bàn CONFIRMED + bàn RESERVED nhưng chưa check-in:
-   * quá giờ bắt đầu + grace → NO_SHOW và bàn về AVAILABLE.
-   * VD: đặt 18:00, đến 18:30 chưa bật bàn → tự động trả trống.
+   * CONFIRMED chưa check-in, quá giờ bắt đầu + grace → NO_SHOW.
    */
   async releaseExpiredNoShowBookings(
     graceMinutes = CHECKIN_GRACE_MINUTES,
@@ -38,7 +50,6 @@ export class BookingService {
       where: {
         status: BookingStatus.CONFIRMED,
         session: { is: null },
-        table: { status: TableStatus.RESERVED },
       },
     });
 
@@ -46,13 +57,7 @@ export class BookingService {
     let released = 0;
 
     for (const booking of bookings) {
-      const startAt = this.parseBookingDateTime(
-        booking.bookingDate,
-        booking.startTime,
-      );
-      const deadline = new Date(startAt.getTime() + graceMinutes * 60 * 1000);
-
-      if (now >= deadline) {
+      if (isBookingExpiredForNoShow(booking, now, graceMinutes)) {
         await this.markNoShow(booking.id);
         released++;
       }
@@ -61,8 +66,119 @@ export class BookingService {
     return released;
   }
 
+  /**
+   * Đồng bộ RESERVED theo khung giữ chỗ (chỉ khi bàn không OCCUPIED).
+   */
+  async syncAllTableReservationStatuses(): Promise<void> {
+    const tables = await this.databaseService.table.findMany({
+      where: { status: { not: TableStatus.OCCUPIED } },
+      select: { id: true },
+    });
+
+    for (const table of tables) {
+      await this.syncTableReservationStatus(table.id);
+    }
+  }
+
+  async syncTableReservationStatus(tableId: string): Promise<void> {
+    const table = await this.databaseService.table.findUnique({
+      where: { id: tableId },
+    });
+    if (!table || table.status === TableStatus.OCCUPIED) {
+      return;
+    }
+
+    const holdBooking = await this.findHoldWindowBooking(tableId);
+
+    if (holdBooking) {
+      if (table.status !== TableStatus.RESERVED) {
+        await this.databaseService.table.update({
+          where: { id: tableId },
+          data: { status: TableStatus.RESERVED },
+        });
+      }
+      return;
+    }
+
+    if (table.status === TableStatus.RESERVED) {
+      await this.databaseService.table.update({
+        where: { id: tableId },
+        data: { status: TableStatus.AVAILABLE },
+      });
+    }
+  }
+
+  async assertWalkInAllowed(tableId: string): Promise<void> {
+    const holdBooking = await this.findHoldWindowBooking(tableId);
+    if (!holdBooking) {
+      return;
+    }
+
+    const startAt = parseBookingDateTime(
+      holdBooking.bookingDate,
+      holdBooking.startTime,
+    );
+    throw new BadRequestException(
+      `Bàn đang giữ chỗ cho đặt bàn ${holdBooking.bookingCode} (${holdBooking.startTime}–${holdBooking.endTime}, khách ${holdBooking.customerName}). ` +
+        `Chỉ có thể check-in đặt bàn từ ${CHECKIN_EARLY_MINUTES} phút trước ${startAt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' })}.`,
+    );
+  }
+
+  assertCheckInAllowed(booking: {
+    status: BookingStatus;
+    bookingDate: Date;
+    startTime: string;
+    endTime: string;
+    bookingCode: string;
+  }): void {
+    if (!canCheckIn(booking)) {
+      const startAt = parseBookingDateTime(booking.bookingDate, booking.startTime);
+      throw new BadRequestException(
+        `Chưa đến khung giờ check-in cho đặt bàn ${booking.bookingCode}. ` +
+          `Check-in từ ${CHECKIN_EARLY_MINUTES} phút trước ${booking.startTime} đến ${CHECKIN_GRACE_MINUTES} phút sau giờ đặt (${startAt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' })}).`,
+      );
+    }
+  }
+
+  async getUpcomingBookingForTable(tableId: string) {
+    const now = new Date();
+    const bookings = await this.databaseService.tableBooking.findMany({
+      where: {
+        tableId,
+        status: BookingStatus.CONFIRMED,
+        session: { is: null },
+      },
+      orderBy: [{ bookingDate: 'asc' }, { startTime: 'asc' }],
+    });
+
+    for (const booking of bookings) {
+      const startAt = parseBookingDateTime(booking.bookingDate, booking.startTime);
+      if (startAt > now && !isInHoldWindow(booking, now)) {
+        return booking;
+      }
+    }
+
+    return null;
+  }
+
+  private async findHoldWindowBooking(tableId: string) {
+    const bookings = await this.databaseService.tableBooking.findMany({
+      where: {
+        tableId,
+        status: BookingStatus.CONFIRMED,
+        session: { is: null },
+      },
+      orderBy: [{ bookingDate: 'asc' }, { startTime: 'asc' }],
+    });
+
+    const now = new Date();
+    return bookings.find((b) => isInHoldWindow(b, now)) ?? null;
+  }
+
   async getDashboard(query: BookingQueryDto) {
     await this.releaseExpiredNoShowBookings();
+    await this.syncAllTableReservationStatuses();
+
     const date = query.date ?? new Date().toISOString().slice(0, 10);
     const dateStart = new Date(`${date}T00:00:00.000Z`);
 
@@ -91,8 +207,13 @@ export class BookingService {
           include: {
             table: true,
             confirmedBy: { select: { fullName: true } },
+            session: { select: { id: true } },
           },
-          orderBy: [{ bookingDate: 'asc' }, { startTime: 'asc' }],
+          orderBy: [
+            { bookingDate: 'desc' },
+            { startTime: 'desc' },
+            { createdAt: 'desc' },
+          ],
         }),
         this.databaseService.tableBooking.findMany({
           select: { status: true, bookingDate: true },
@@ -205,6 +326,13 @@ export class BookingService {
   }
 
   async createBooking(dto: CreateBookingDto, customerId?: string) {
+    await this.assertNoBookingConflict(
+      dto.tableId,
+      dto.bookingDate,
+      dto.startTime,
+      dto.endTime,
+    );
+
     const code = await this.generateBookingCode();
     const booking = await this.databaseService.tableBooking.create({
       data: {
@@ -238,6 +366,15 @@ export class BookingService {
 
   async confirmBooking(id: string, userId: string) {
     const booking = await this.findBookingOrThrow(id);
+
+    await this.assertNoBookingConflict(
+      booking.tableId,
+      booking.bookingDate.toISOString().slice(0, 10),
+      booking.startTime,
+      booking.endTime,
+      booking.id,
+    );
+
     const updated = await this.databaseService.tableBooking.update({
       where: { id: booking.id },
       data: {
@@ -250,10 +387,7 @@ export class BookingService {
       },
     });
 
-    await this.databaseService.table.update({
-      where: { id: booking.tableId },
-      data: { status: TableStatus.RESERVED },
-    });
+    await this.syncTableReservationStatus(booking.tableId);
 
     await this.notificationService.sendBookingConfirmedNotification(updated);
 
@@ -262,24 +396,27 @@ export class BookingService {
 
   async getConfirmedBookingForTable(tableId: string) {
     await this.releaseExpiredNoShowBookings();
+    await this.syncTableReservationStatus(tableId);
 
-    const booking = await this.databaseService.tableBooking.findFirst({
+    const bookings = await this.databaseService.tableBooking.findMany({
       where: {
         tableId,
         status: BookingStatus.CONFIRMED,
+        session: { is: null },
       },
       include: {
         table: true,
         confirmedBy: { select: { fullName: true } },
       },
-      orderBy: [{ bookingDate: 'desc' }, { startTime: 'desc' }],
+      orderBy: [{ bookingDate: 'asc' }, { startTime: 'asc' }],
     });
 
-    if (!booking) {
+    const eligible = bookings.find((b) => canCheckIn(b));
+    if (!eligible) {
       return null;
     }
 
-    return this.mapBooking(booking);
+    return this.mapBooking(eligible);
   }
 
   async markNoShow(id: string) {
@@ -287,6 +424,11 @@ export class BookingService {
     if (booking.status !== BookingStatus.CONFIRMED) {
       throw new BadRequestException(
         'Chỉ đánh dấu không đến với đặt bàn đã xác nhận',
+      );
+    }
+    if (await this.hasCheckedInSession(booking.id)) {
+      throw new BadRequestException(
+        'Không thể đánh dấu không đến khi khách đã check-in',
       );
     }
 
@@ -300,13 +442,10 @@ export class BookingService {
         },
       });
 
-      await tx.table.updateMany({
-        where: { id: booking.tableId, status: TableStatus.RESERVED },
-        data: { status: TableStatus.AVAILABLE },
-      });
-
       return result;
     });
+
+    await this.syncTableReservationStatus(booking.tableId);
 
     await this.notificationService.sendBookingNoShowNotification(updated);
 
@@ -326,7 +465,11 @@ export class BookingService {
       throw new NotFoundException('Không tìm thấy đặt bàn');
     }
 
-    const wasConfirmed = booking.status === BookingStatus.CONFIRMED;
+    if (booking.session) {
+      throw new BadRequestException(
+        'Không thể hủy đặt bàn đã check-in. Vui lòng xử lý tại Thu ngân.',
+      );
+    }
 
     if (role === 'CUSTOMER') {
       if (!userId) {
@@ -361,15 +504,10 @@ export class BookingService {
         },
       });
 
-      if (wasConfirmed) {
-        await tx.table.updateMany({
-          where: { id: booking.tableId, status: TableStatus.RESERVED },
-          data: { status: TableStatus.AVAILABLE },
-        });
-      }
-
       return result;
     });
+
+    await this.syncTableReservationStatus(booking.tableId);
 
     if (role && role !== 'CUSTOMER') {
       await this.notificationService.sendBookingCancelledNotification(updated);
@@ -378,13 +516,39 @@ export class BookingService {
     return this.mapBooking(updated);
   }
 
-  /** Ghép ngày đặt + giờ bắt đầu theo múi giờ VN (UTC+7) */
-  private parseBookingDateTime(bookingDate: Date, time: string): Date {
-    const dateStr = bookingDate.toISOString().slice(0, 10);
-    const [hour, minute] = time.split(':').map((v) => parseInt(v, 10));
-    const hh = String(hour).padStart(2, '0');
-    const mm = String(minute).padStart(2, '0');
-    return new Date(`${dateStr}T${hh}:${mm}:00+07:00`);
+  private async assertNoBookingConflict(
+    tableId: string,
+    bookingDate: string,
+    startTime: string,
+    endTime: string,
+    excludeBookingId?: string,
+  ) {
+    const date = new Date(`${bookingDate}T00:00:00.000Z`);
+    const newStart = parseBookingDateTime(date, startTime);
+    const newEnd = parseBookingDateTime(date, endTime);
+
+    if (newEnd <= newStart) {
+      throw new BadRequestException('Giờ kết thúc phải sau giờ bắt đầu');
+    }
+
+    const existing = await this.databaseService.tableBooking.findMany({
+      where: {
+        tableId,
+        bookingDate: date,
+        status: { in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
+        ...(excludeBookingId ? { id: { not: excludeBookingId } } : {}),
+      },
+    });
+
+    for (const b of existing) {
+      const bStart = parseBookingDateTime(b.bookingDate, b.startTime);
+      const bEnd = parseBookingDateTime(b.bookingDate, b.endTime);
+      if (timeRangesOverlap(newStart, newEnd, bStart, bEnd)) {
+        throw new BadRequestException(
+          `Trùng khung giờ với đặt bàn ${b.bookingCode} (${b.startTime}–${b.endTime})`,
+        );
+      }
+    }
   }
 
   private canCustomerCancelBooking(booking: {
@@ -395,6 +559,14 @@ export class BookingService {
       booking.status === BookingStatus.PENDING ||
       (booking.status === BookingStatus.CONFIRMED && !booking.session)
     );
+  }
+
+  private async hasCheckedInSession(bookingId: string): Promise<boolean> {
+    const session = await this.databaseService.tableSession.findFirst({
+      where: { bookingId },
+      select: { id: true },
+    });
+    return !!session;
   }
 
   private async findBookingOrThrow(id: string) {
@@ -423,7 +595,9 @@ export class BookingService {
     status: BookingStatus;
     createdAt: Date;
     confirmedBy: { fullName: string } | null;
+    session?: { id: string } | null;
   }) {
+    const hasCheckedIn = !!booking.session;
     return {
       id: booking.id,
       bookingCode: booking.bookingCode,
@@ -440,6 +614,7 @@ export class BookingService {
       status: booking.status,
       createdAt: booking.createdAt.toISOString(),
       confirmedBy: booking.confirmedBy?.fullName,
+      hasCheckedIn,
     };
   }
 

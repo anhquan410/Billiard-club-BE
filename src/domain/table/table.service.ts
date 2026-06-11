@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import {
   BookingStatus,
+  BonusTransactionType,
   PaymentMethod,
   SessionStatus,
   TableStatus,
@@ -31,6 +32,7 @@ export class TableService {
   // Lấy tất cả bàn (kèm tên khách & tổng tiền ước tính nếu đang phục vụ)
   async getAllTables() {
     await this.bookingService.releaseExpiredNoShowBookings();
+    await this.bookingService.syncAllTableReservationStatuses();
 
     const tables = await this.databaseService.table.findMany({
       orderBy: { tableNumber: 'asc' },
@@ -45,48 +47,78 @@ export class TableService {
           },
         },
         bookings: {
-          where: { status: BookingStatus.CONFIRMED },
+          where: { status: BookingStatus.CONFIRMED, session: { is: null } },
+          orderBy: [{ bookingDate: 'asc' }, { startTime: 'asc' }],
           take: 1,
-          select: { customerName: true },
+          select: {
+            id: true,
+            customerName: true,
+            startTime: true,
+            endTime: true,
+            bookingDate: true,
+          },
         },
       },
     });
 
     const now = new Date();
 
-    return tables.map((table) => {
-      const session = table.sessions[0];
-      let customerName: string | null = null;
-      let estimatedTotal: number | null = null;
+    return Promise.all(
+      tables.map(async (table) => {
+        const session = table.sessions[0];
+        let customerName: string | null = null;
+        let estimatedTotal: number | null = null;
+        let upcomingBooking:
+          | {
+              id: string;
+              customerName: string;
+              startTime: string;
+              endTime: string;
+            }
+          | undefined;
 
-      if (session) {
-        customerName =
-          session.customer?.fullName ?? session.booking?.customerName ?? null;
+        if (session) {
+          customerName =
+            session.customer?.fullName ?? session.booking?.customerName ?? null;
 
-        const durationMins = Math.ceil(
-          (now.getTime() - new Date(session.startTime).getTime()) / 60000,
-        );
-        const tablePrice =
-          Math.round(Number(table.hourlyRate) * (durationMins / 60) * 100) /
-          100;
-        let servicesTotal = 0;
-        for (const s of session.services) {
-          servicesTotal += Number(s.subtotal);
+          const durationMins = Math.ceil(
+            (now.getTime() - new Date(session.startTime).getTime()) / 60000,
+          );
+          const tablePrice =
+            Math.round(Number(table.hourlyRate) * (durationMins / 60) * 100) /
+            100;
+          let servicesTotal = 0;
+          for (const s of session.services) {
+            servicesTotal += Number(s.subtotal);
+          }
+          estimatedTotal = Math.round((tablePrice + servicesTotal) * 100) / 100;
+        } else if (table.status === TableStatus.RESERVED && table.bookings[0]) {
+          customerName = table.bookings[0].customerName;
+        } else if (table.status === TableStatus.AVAILABLE) {
+          const upcoming = await this.bookingService.getUpcomingBookingForTable(
+            table.id,
+          );
+          if (upcoming) {
+            upcomingBooking = {
+              id: upcoming.id,
+              customerName: upcoming.customerName,
+              startTime: upcoming.startTime,
+              endTime: upcoming.endTime,
+            };
+          }
         }
-        estimatedTotal = Math.round((tablePrice + servicesTotal) * 100) / 100;
-      } else if (table.status === TableStatus.RESERVED && table.bookings[0]) {
-        customerName = table.bookings[0].customerName;
-      }
 
-      const { sessions: _sessions, bookings: _bookings, ...rest } = table;
+        const { sessions: _sessions, bookings: _bookings, ...rest } = table;
 
-      return {
-        ...rest,
-        hourlyRate: Number(rest.hourlyRate),
-        customerName: customerName ?? undefined,
-        estimatedTotal: estimatedTotal ?? undefined,
-      };
-    });
+        return {
+          ...rest,
+          hourlyRate: Number(rest.hourlyRate),
+          customerName: customerName ?? undefined,
+          estimatedTotal: estimatedTotal ?? undefined,
+          upcomingBooking,
+        };
+      }),
+    );
   }
 
   // Lấy thông tin bàn theo ID
@@ -114,6 +146,7 @@ export class TableService {
       },
       include: {
         services: {
+          orderBy: { createdAt: 'asc' },
           include: {
             product: true, // Lấy thông tin sản phẩm nếu có
           },
@@ -257,13 +290,16 @@ export class TableService {
     };
   }
 
-  // Bật bàn (bắt đầu phiên chơi) — walk-in (AVAILABLE) hoặc check-in đặt bàn (RESERVED)
+  // Walk-in (AVAILABLE) hoặc check-in đặt bàn (bookingId, trong khung giờ)
   async startSession(
     tableId: string,
     cashierId: string,
     note?: string,
     bookingId?: string,
   ) {
+    await this.bookingService.releaseExpiredNoShowBookings();
+    await this.bookingService.syncTableReservationStatus(tableId);
+
     const table = await this.databaseService.table.findUnique({
       where: { id: tableId },
     });
@@ -289,21 +325,23 @@ export class TableService {
       endTime: string;
     } | null = null;
 
-    if (table.status === TableStatus.RESERVED) {
+    if (bookingId) {
       const booking = await this.databaseService.tableBooking.findFirst({
         where: {
+          id: bookingId,
           tableId: table.id,
           status: BookingStatus.CONFIRMED,
-          ...(bookingId ? { id: bookingId } : {}),
+          session: { is: null },
         },
-        orderBy: [{ bookingDate: 'desc' }, { startTime: 'desc' }],
       });
 
       if (!booking) {
         throw new BadRequestException(
-          'Không tìm thấy đặt bàn đã xác nhận cho bàn này. Vui lòng kiểm tra lại.',
+          'Không tìm thấy đặt bàn hợp lệ để check-in.',
         );
       }
+
+      this.bookingService.assertCheckInAllowed(booking);
 
       linkedBookingId = booking.id;
       bookingCustomerId = booking.customerId;
@@ -315,6 +353,13 @@ export class TableService {
         startTime: booking.startTime,
         endTime: booking.endTime,
       };
+    } else {
+      if (table.status === TableStatus.RESERVED) {
+        throw new BadRequestException(
+          'Bàn đang giữ chỗ đặt bàn. Vui lòng check-in đặt bàn thay vì mở walk-in.',
+        );
+      }
+      await this.bookingService.assertWalkInAllowed(tableId);
     }
 
     const cashier = await this.databaseService.user.findUnique({
@@ -468,6 +513,36 @@ export class TableService {
     });
   }
 
+  private async cleanupIncompleteSessionOrder(orderId: string) {
+    const order = await this.databaseService.order.findUnique({
+      where: { id: orderId },
+      include: { bonusTransactions: true },
+    });
+    if (!order) return;
+
+    await this.databaseService.$transaction(async (tx) => {
+      for (const transaction of order.bonusTransactions) {
+        if (transaction.type === BonusTransactionType.REDEEMED) {
+          await tx.user.update({
+            where: { id: transaction.userId },
+            data: {
+              bonusPoints: { increment: Math.abs(transaction.points) },
+            },
+          });
+        } else if (transaction.type === BonusTransactionType.EARNED) {
+          await tx.user.update({
+            where: { id: transaction.userId },
+            data: { bonusPoints: { decrement: transaction.points } },
+          });
+        }
+      }
+
+      await tx.bonusTransaction.deleteMany({ where: { orderId: order.id } });
+      await tx.orderItem.deleteMany({ where: { orderId: order.id } });
+      await tx.order.delete({ where: { id: order.id } });
+    });
+  }
+
   // Thanh toán & tắt bàn
   async endSession(
     tableId: string,
@@ -486,8 +561,42 @@ export class TableService {
       where: { id: tableId },
     });
     if (!table) throw new NotFoundException('Không tìm thấy bàn!');
-    if (table.status !== TableStatus.OCCUPIED)
+
+    if (table.status !== TableStatus.OCCUPIED) {
+      const recentCompletedSession =
+        await this.databaseService.tableSession.findFirst({
+          where: {
+            tableId: table.id,
+            status: SessionStatus.COMPLETED,
+          },
+          orderBy: { endTime: 'desc' },
+        });
+
+      if (recentCompletedSession) {
+        const paidOrder = await this.databaseService.order.findUnique({
+          where: { sessionId: recentCompletedSession.id },
+        });
+
+        if (paidOrder) {
+          return {
+            message: 'Thanh toán thành công, bàn đã được tắt!',
+            order: paidOrder,
+            tableId: table.id,
+            durationMins: recentCompletedSession.duration ?? 0,
+            tablePrice: Number(recentCompletedSession.tablePrice),
+            servicesTotal:
+              Number(recentCompletedSession.totalPrice) -
+              Number(recentCompletedSession.tablePrice),
+            total: Number(paidOrder.total),
+            bonusPointsEarned: paidOrder.bonusPointsEarned,
+            discountFromTier: Number(paidOrder.discountFromTier),
+            discountFromPoints: Number(paidOrder.discountFromPoints),
+          };
+        }
+      }
+
       throw new BadRequestException('Bàn hiện không có ai chơi!');
+    }
 
     // 2. Lấy session hiện tại
     const session = await this.databaseService.tableSession.findFirst({
@@ -583,25 +692,87 @@ export class TableService {
       amountBeforeBonus - discountFromPoints - discountFromTier,
     );
 
-    const order = await this.databaseService.order.create({
-      data: {
-        sessionId: session.id,
-        createdBy: userId,
-        subtotal: subtotal,
-        discount: manualDiscount,
-        tax: 0,
-        total: total,
-        paymentMethod: body.paymentMethod,
-        status: 'PAID',
-        paidAt: endTime,
-        note: body.note ?? '',
-        customerId: orderCustomerId,
-        orderNumber: orderNumber,
-        bonusPointsUsed,
-        bonusPointsEarned,
-        discountFromPoints,
-        discountFromTier,
-      },
+    const existingOrder = await this.databaseService.order.findUnique({
+      where: { sessionId: session.id },
+    });
+
+    if (existingOrder) {
+      if (session.status === SessionStatus.COMPLETED) {
+        return {
+          message: 'Thanh toán thành công, bàn đã được tắt!',
+          order: existingOrder,
+          tableId: table.id,
+          durationMins,
+          tablePrice,
+          servicesTotal,
+          total: Number(existingOrder.total),
+          bonusPointsEarned: existingOrder.bonusPointsEarned,
+          discountFromTier: Number(existingOrder.discountFromTier),
+          discountFromPoints: Number(existingOrder.discountFromPoints),
+        };
+      }
+
+      await this.cleanupIncompleteSessionOrder(existingOrder.id);
+    }
+
+    const order = await this.databaseService.$transaction(async (tx) => {
+      const createdOrder = await tx.order.create({
+        data: {
+          sessionId: session.id,
+          createdBy: userId,
+          subtotal: subtotal,
+          discount: manualDiscount,
+          tax: 0,
+          total: total,
+          paymentMethod: body.paymentMethod,
+          status: 'PAID',
+          paidAt: endTime,
+          note: body.note ?? '',
+          customerId: orderCustomerId,
+          orderNumber: orderNumber,
+          bonusPointsUsed,
+          bonusPointsEarned,
+          discountFromPoints,
+          discountFromTier,
+        },
+      });
+
+      if (session.services && session.services.length > 0) {
+        await tx.orderItem.createMany({
+          data: session.services.map((service) => ({
+            orderId: createdOrder.id,
+            productId: service.productId,
+            quantity: service.quantity,
+            price: service.price,
+            subtotal: service.subtotal,
+          })),
+        });
+      }
+
+      await tx.tableSession.update({
+        where: { id: session.id },
+        data: {
+          endTime,
+          duration: durationMins,
+          tablePrice: tablePrice,
+          totalPrice: subtotal,
+          status: SessionStatus.COMPLETED,
+        },
+      });
+
+      await tx.table.update({
+        where: { id: table.id },
+        data: { status: TableStatus.AVAILABLE },
+      });
+
+      if (session.bookingId) {
+        await tx.tableBooking.update({
+          where: { id: session.bookingId },
+          data: { status: BookingStatus.COMPLETED },
+        });
+      }
+
+      return createdOrder;
     });
 
     if (orderCustomerId && bonusPointsUsed > 0) {
@@ -617,49 +788,16 @@ export class TableService {
       await this.bonusService.earnPoints(orderCustomerId, order.id, total);
     }
 
-    // 6.1. Tạo OrderItem từ TableSessionService
-    if (session.services && session.services.length > 0) {
-      const orderItems = session.services.map((service) => ({
-        orderId: order.id,
-        productId: service.productId,
-        quantity: service.quantity,
-        price: service.price,
-        subtotal: service.subtotal,
-      }));
-
-      await this.databaseService.orderItem.createMany({
-        data: orderItems,
-      });
-    }
-
-    // 7. Hoàn thành session + update Table trả trạng thái AVAILABLE
-    await this.databaseService.tableSession.update({
-      where: { id: session.id },
-      data: {
-        endTime,
-        duration: durationMins,
-        tablePrice: tablePrice,
-        totalPrice: subtotal,
-        status: 'COMPLETED',
-      },
-    });
-    await this.databaseService.table.update({
+    await this.bookingService.syncTableReservationStatus(table.id);
+    const tableAfterSync = await this.databaseService.table.findUnique({
       where: { id: table.id },
-      data: { status: 'AVAILABLE' },
     });
-
-    if (session.bookingId) {
-      await this.databaseService.tableBooking.update({
-        where: { id: session.bookingId },
-        data: { status: BookingStatus.COMPLETED },
-      });
-    }
 
     // 8. Emit WebSocket event - bàn đã được tắt
     this.webSocketGateway.emitTableEnded({
       tableId: table.id,
       tableNumber: table.tableNumber,
-      status: TableStatus.AVAILABLE,
+      status: tableAfterSync?.status ?? TableStatus.AVAILABLE,
     });
 
     const customerName =
