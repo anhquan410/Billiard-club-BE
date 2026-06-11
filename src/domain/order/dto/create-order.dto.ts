@@ -9,7 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { PaymentMethod } from '@prisma/client';
+import { PaymentMethod } from 'src/prisma';
 
 export class OrderItemDto {
   @IsString()

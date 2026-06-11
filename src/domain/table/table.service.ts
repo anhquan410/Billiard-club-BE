@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PaymentMethod, SessionStatus, TableStatus } from '@prisma/client';
+import { PaymentMethod, SessionStatus, TableStatus } from 'src/prisma';
 import { DatabaseService } from 'src/database/database.service';
 import { BilliardWebSocketGateway } from 'src/websocket/websocket.gateway';
 import { NotificationService } from '../notification/notification.service';
@@ -172,7 +172,7 @@ export class TableService {
   }
 
   // Bật bàn (bắt đầu phiên chơi)
-  async startSession(tableId: string, note?: string) {
+  async startSession(tableId: string, cashierId: string, note?: string) {
     // 1. Kiểm tra bàn có tồn tại và đang AVAILABLE không
     const table = await this.databaseService.table.findUnique({
       where: { id: tableId },
@@ -181,11 +181,18 @@ export class TableService {
     if (table.status !== TableStatus.AVAILABLE)
       throw new BadRequestException('Bàn này hiện không sẵn sàng!');
 
+    const cashier = await this.databaseService.user.findUnique({
+      where: { id: cashierId },
+    });
+    if (!cashier) {
+      throw new BadRequestException('Không tìm thấy thông tin thu ngân!');
+    }
+
     // 2. Tạo session mới
     const session = await this.databaseService.tableSession.create({
       data: {
         tableId: table.id,
-        cashierId: 'system',
+        cashierId,
         note,
         startTime: new Date(),
         status: SessionStatus.ACTIVE,

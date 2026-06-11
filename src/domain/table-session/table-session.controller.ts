@@ -41,7 +41,7 @@ export class TableSessionController {
   }
 
   // Cập nhật số lượng dịch vụ trong phiên chơi (nếu cần)
-  @Post(':sessionId/update-service-quantity/')
+  @Post(':sessionId/update-service-quantity')
   @Roles('ADMIN', 'CASHIER', 'STAFF')
   async updateServiceQuantity(
     @Param('sessionId') sessionId: string,

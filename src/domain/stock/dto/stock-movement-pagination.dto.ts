@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsOptional, IsInt, Min, IsString, IsEnum } from 'class-validator';
-import { MovementType } from '@prisma/client';
+import { MovementType } from 'src/prisma';
 
 export class StockMovementPaginationDto {
   @IsOptional()

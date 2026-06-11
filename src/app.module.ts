@@ -13,6 +13,10 @@ import { BonusModule } from './domain/bonus/bonus.module';
 import { WebSocketModule } from './websocket/websocket.module';
 
 import { NotificationModule } from './domain/notification/notification.module';
+import { ReportModule } from './domain/report/report.module';
+import { AccountingModule } from './domain/accounting/accounting.module';
+import { BookingModule } from './domain/booking/booking.module';
+import { TaskModule } from './domain/task/task.module';
 
 @Module({
   imports: [
@@ -27,6 +31,10 @@ import { NotificationModule } from './domain/notification/notification.module';
     BonusModule,
     WebSocketModule,
     NotificationModule,
+    ReportModule,
+    AccountingModule,
+    BookingModule,
+    TaskModule,
   ],
   controllers: [AppController],
   providers: [AppService],

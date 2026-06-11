@@ -10,6 +10,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UserPaginationDto } from './dto/user-pagiation.dto';
 import { AuthUtils } from '../auth/utils/auth.utils';
+import { UserStatus } from 'src/prisma';
 
 @Injectable()
 export class UserService {
@@ -99,7 +100,10 @@ export class UserService {
 
   // Get all users (for admin)
   async getAllUsers() {
-    return await this.databaseService.user.findMany();
+    return await this.databaseService.user.findMany({
+      where: { status: UserStatus.ACTIVE },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   // Paginate users (for admin)
@@ -109,11 +113,12 @@ export class UserService {
 
     const [items, total] = await Promise.all([
       this.databaseService.user.findMany({
+        where: { status: UserStatus.ACTIVE },
         skip: (page - 1) * limit,
         take: limit,
         orderBy: { createdAt: 'desc' }, // pagination stable
       }),
-      this.databaseService.user.count(),
+      this.databaseService.user.count({ where: { status: UserStatus.ACTIVE } }),
     ]);
 
     return {
@@ -133,12 +138,67 @@ export class UserService {
     });
   }
 
-  // Delete user
+  // Delete user (hard delete when possible, otherwise deactivate)
   async deleteUser(id: string) {
-    const deleteUser = await this.databaseService.user.delete({
-      where: { id },
-    });
-    return `User ${deleteUser.fullName} has been deleted.`;
+    const user = await this.findById(id);
+
+    const hasBlockingHistory = await this.databaseService.$transaction(
+      async (tx) => {
+        await tx.notification.deleteMany({ where: { userId: id } });
+        await tx.bonusTransaction.deleteMany({ where: { userId: id } });
+
+        await tx.tableSession.updateMany({
+          where: { cashierId: id },
+          data: { cashierId: null },
+        });
+        await tx.tableSession.updateMany({
+          where: { staffId: id },
+          data: { staffId: null },
+        });
+
+        await tx.order.updateMany({
+          where: { customerId: id },
+          data: { customerId: null },
+        });
+
+        await tx.tableBooking.updateMany({
+          where: { customerId: id },
+          data: { customerId: null },
+        });
+        await tx.tableBooking.updateMany({
+          where: { confirmedById: id },
+          data: { confirmedById: null },
+        });
+
+        await tx.staffTask.deleteMany({
+          where: { OR: [{ assigneeId: id }, { createdById: id }] },
+        });
+
+        const [stockMovements, accountingRecords] = await Promise.all([
+          tx.stockMovement.count({ where: { createdBy: id } }),
+          tx.accountingTransaction.count({ where: { createdById: id } }),
+        ]);
+
+        return stockMovements > 0 || accountingRecords > 0;
+      },
+    );
+
+    if (hasBlockingHistory) {
+      await this.databaseService.user.update({
+        where: { id },
+        data: { status: UserStatus.INACTIVE },
+      });
+      return {
+        message: `Đã vô hiệu hóa tài khoản ${user.fullName} (còn dữ liệu kho/kế toán, không xóa vĩnh viễn được).`,
+        softDeleted: true,
+      };
+    }
+
+    await this.databaseService.user.delete({ where: { id } });
+    return {
+      message: `Đã xóa tài khoản ${user.fullName}.`,
+      softDeleted: false,
+    };
   }
 
   // Change user password

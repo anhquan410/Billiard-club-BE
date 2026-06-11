@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
@@ -25,6 +26,13 @@ export class OrderController {
   @Roles('ADMIN')
   async getAllOrders() {
     return this.orderService.getAllOrders();
+  }
+
+  @Get('my-history')
+  @UseGuards(RolesGuard)
+  @Roles('CUSTOMER')
+  async getMyPlayHistory(@User('id') userId: string) {
+    return this.orderService.getMyPlayHistory(userId);
   }
 
   // Get order by ID

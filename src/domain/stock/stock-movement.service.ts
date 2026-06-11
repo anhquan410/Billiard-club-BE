@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { StockMovementPaginationDto } from './dto/stock-movement-pagination.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma } from 'src/prisma';
 
 @Injectable()
 export class StockMovementService {
@@ -82,7 +82,7 @@ export class StockMovementService {
       .div(afterStock);
 
     // 2. Thực hiện transaction để đảm bảo tính nhất quán
-    const result = await this.databaseService.$transaction(async (tx) => {
+    const result = await this.databaseService.$transaction(async (tx: Prisma.TransactionClient) => {
       // 2.1. Cập nhật tồn kho sản phẩm
       const updatedProduct = await tx.product.update({
         where: { id: productId },
@@ -140,7 +140,7 @@ export class StockMovementService {
     }
 
     // 2. Thực hiện transaction để đảm bảo tính nhất quán
-    const result = await this.databaseService.$transaction(async (tx) => {
+    const result = await this.databaseService.$transaction(async (tx: Prisma.TransactionClient) => {
       // 2.1. Cập nhật tồn kho sản phẩm
       const updatedProduct = await tx.product.update({
         where: { id: productId },

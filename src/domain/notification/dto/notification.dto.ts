@@ -1,4 +1,4 @@
-import { NotificationType } from '@prisma/client';
+import { NotificationType } from 'src/prisma';
 
 export class NotificationDto {
   userId!: string;

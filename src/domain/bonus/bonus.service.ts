@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
-import { MembershipTier, BonusTransactionType } from '@prisma/client';
+import { MembershipTier, BonusTransactionType } from 'src/prisma';
 
 @Injectable()
 export class BonusService {

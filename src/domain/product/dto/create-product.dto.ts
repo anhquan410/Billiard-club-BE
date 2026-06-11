@@ -1,4 +1,4 @@
-import { ProductCategory, ProductStatus } from '@prisma/client';
+import { ProductCategory, ProductStatus } from 'src/prisma';
 import { Type } from 'class-transformer';
 import {
   IsString,

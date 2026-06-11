@@ -8,7 +8,7 @@ import {
 import { DatabaseService } from 'src/database/database.service';
 import { BonusService } from '../bonus/bonus.service';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { OrderStatus, Prisma } from '@prisma/client';
+import { BookingStatus, OrderStatus, Prisma } from 'src/prisma';
 
 @Injectable()
 export class OrderService {
@@ -219,6 +219,75 @@ export class OrderService {
     }
 
     return updatedOrder;
+  }
+
+  async getMyPlayHistory(customerId: string) {
+    const user = await this.databaseService.user.findUnique({
+      where: { id: customerId },
+    });
+    if (!user) {
+      throw new NotFoundException('Không tìm thấy tài khoản');
+    }
+
+    const orders = await this.databaseService.order.findMany({
+      where: {
+        customerId,
+        status: OrderStatus.PAID,
+      },
+      include: {
+        session: {
+          include: {
+            table: { select: { id: true, tableName: true, tableNumber: true } },
+            services: { include: { product: { select: { name: true } } } },
+          },
+        },
+        items: { include: { product: { select: { name: true } } } },
+      },
+      orderBy: { paidAt: 'desc' },
+    });
+
+    const bookings = await this.databaseService.tableBooking.findMany({
+      where: {
+        OR: [{ customerId }, { customerPhone: user.phone }],
+        status: {
+          in: [
+            BookingStatus.CONFIRMED,
+            BookingStatus.COMPLETED,
+            BookingStatus.CANCELLED,
+            BookingStatus.NO_SHOW,
+          ],
+        },
+      },
+      include: { table: { select: { tableName: true } } },
+      orderBy: { bookingDate: 'desc' },
+    });
+
+    return {
+      playSessions: orders.map((order) => ({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        paidAt: order.paidAt?.toISOString() ?? order.createdAt.toISOString(),
+        tableName: order.session?.table?.tableName ?? '—',
+        durationMins: order.session?.duration ?? 0,
+        tablePrice: Math.round(Number(order.session?.tablePrice ?? 0)),
+        servicesTotal: Math.round(
+          Number(order.subtotal) - Number(order.session?.tablePrice ?? 0),
+        ),
+        total: Math.round(Number(order.total)),
+        paymentMethod: order.paymentMethod,
+        serviceCount: order.session?.services?.length ?? order.items.length,
+      })),
+      bookings: bookings.map((booking) => ({
+        id: booking.id,
+        bookingCode: booking.bookingCode,
+        tableName: booking.table.tableName,
+        bookingDate: booking.bookingDate.toISOString().slice(0, 10),
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        status: booking.status,
+        guestCount: booking.guestCount,
+      })),
+    };
   }
 
   /**

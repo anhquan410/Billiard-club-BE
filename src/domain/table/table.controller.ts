@@ -19,7 +19,7 @@ export class TableController {
   // Lấy tất cả bàn
   @Get('all')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'CASHIER', 'STAFF')
+  @Roles('ADMIN', 'CASHIER', 'STAFF', 'CUSTOMER')
   async getAllTables() {
     const tables = await this.tableService.getAllTables();
     return tables;
@@ -47,9 +47,10 @@ export class TableController {
   @Roles('ADMIN', 'CASHIER')
   async startSession(
     @Param('id') tableId: string,
+    @User('id') userId: string,
     @Body() body: { note?: string },
   ) {
-    return this.tableService.startSession(tableId, body.note);
+    return this.tableService.startSession(tableId, userId, body.note);
   }
 
   // Gắn nhân viên phục vụ vào phiên chơi (Admin hoặc Cashier)
