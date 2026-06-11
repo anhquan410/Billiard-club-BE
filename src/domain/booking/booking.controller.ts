@@ -51,11 +51,25 @@ export class BookingController {
     return this.bookingService.createCustomerBooking(userId, body);
   }
 
+  @Get('table/:tableId/active-confirmed')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'STAFF', 'CASHIER')
+  getConfirmedBookingForTable(@Param('tableId') tableId: string) {
+    return this.bookingService.getConfirmedBookingForTable(tableId);
+  }
+
   @Patch(':id/confirm')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'STAFF', 'CASHIER')
   confirmBooking(@Param('id') id: string, @User('id') userId: string) {
     return this.bookingService.confirmBooking(id, userId);
+  }
+
+  @Patch(':id/no-show')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'STAFF', 'CASHIER')
+  markNoShow(@Param('id') id: string) {
+    return this.bookingService.markNoShow(id);
   }
 
   @Patch(':id/cancel')

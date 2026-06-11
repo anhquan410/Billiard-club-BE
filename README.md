@@ -56,7 +56,7 @@ Cập nhật nội dung file `.env`:
 
 ```env
 # Database - Lấy connection string từ Neon Dashboard
-DATABASE_URL="postgresql://username:password@ep-xxx.region.aws.neon.tech/dbname?sslmode=require"
+DATABASE_URL="postgresql://username:password@ep-xxx.region.aws.neon.tech/dbname?sslmode=verify-full"
 
 # JWT
 JWT_SECRET="your-secret-key-here"

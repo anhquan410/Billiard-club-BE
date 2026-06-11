@@ -13,6 +13,7 @@ import {
 import { BonusService } from './bonus.service';
 import { CalculateDiscountDto } from './dto/calculate-discount.dto';
 import { AdjustPointsDto } from './dto/adjust-points.dto';
+import { UpdateBonusSettingsDto } from './dto/update-bonus-settings.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { User } from '../auth/decorators/user.decorator';
@@ -29,7 +30,8 @@ export class BonusController {
   @UseGuards(RolesGuard)
   async getBonusProfile(@Param('userId') userId: string, @User() user: any) {
     // Chỉ admin hoặc chính user đó mới xem được
-    if (user.role !== 'ADMIN' && user.id !== userId) {
+    const staffRoles = ['ADMIN', 'CASHIER', 'STAFF'];
+    if (!staffRoles.includes(user.role) && user.id !== userId) {
       throw new ForbiddenException('Bạn chỉ được xem thông tin điểm của mình');
     }
 
@@ -84,7 +86,12 @@ export class BonusController {
   ) {
     const { userId, points, reason } = adjustPointsDto;
 
-    await this.bonusService.adjustPoints(userId, points, reason, admin.id);
+    await this.bonusService.adjustPoints(
+      userId,
+      points,
+      reason,
+      admin.fullName as string,
+    );
 
     return {
       message: 'Điều chỉnh điểm thành công',
@@ -97,22 +104,23 @@ export class BonusController {
     };
   }
 
-  /**
-   * Lấy thông tin hệ thống điểm (public)
-   */
+  @Get('settings')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  getSettings() {
+    return this.bonusService.getSettings();
+  }
+
+  @Post('settings')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  updateSettings(@Body() dto: UpdateBonusSettingsDto) {
+    return this.bonusService.updateSettings(dto);
+  }
+
   @Get('system-info')
   @Public()
-  getSystemInfo() {
-    return {
-      pointsPerVnd: 10000, // 10,000 VNĐ = 1 điểm
-      vndPerPoint: 1000, // 1 điểm = 1,000 VNĐ
-      membershipTiers: {
-        BRONZE: { threshold: 500, discount: 5 },
-        SILVER: { threshold: 1000, discount: 10 },
-        GOLD: { threshold: 2000, discount: 15 },
-        PLATINUM: { threshold: 5000, discount: 20 },
-        DIAMOND: { threshold: 10000, discount: 25 },
-      },
-    };
+  async getSystemInfo() {
+    return await this.bonusService.getSystemInfo();
   }
 }

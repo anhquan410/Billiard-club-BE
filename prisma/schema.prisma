@@ -65,6 +65,7 @@ model User {
   notifications          Notification[]
   confirmedBookings      TableBooking[]          @relation("BookingConfirmedBy")
   tableBookings          TableBooking[]          @relation("CustomerBookings")
+  customerSessions       TableSession[]          @relation("SessionCustomer")
   assignedTasks          StaffTask[]             @relation("TaskAssignee")
   createdTasks           StaffTask[]             @relation("TaskCreator")
   accountingTransactions AccountingTransaction[] @relation("AccountingCreatedBy")
@@ -107,6 +108,8 @@ enum SessionStatus {
 model TableSession {
   id         String        @id @default(uuid())
   tableId    String        @map("table_id")
+  bookingId  String?       @unique @map("booking_id") // Liên kết đặt bàn khi check-in
+  customerId String?       @map("customer_id") // Khách gắn với phiên chơi
   cashierId  String?       @map("cashier_id") // Thu ngân/Cashier mở bàn (tự động gắn khi bật bàn)
   staffId    String?       @map("staff_id") // Nhân viên phục vụ thêm (tùy chọn, có thể thay đổi)
   startTime  DateTime      @default(now()) @map("start_time")
@@ -121,6 +124,8 @@ model TableSession {
 
   // Relations
   table    Table                 @relation(fields: [tableId], references: [id])
+  booking  TableBooking?         @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  customer User?                 @relation("SessionCustomer", fields: [customerId], references: [id], onDelete: SetNull)
   cashier  User?                 @relation("OpenedByCashier", fields: [cashierId], references: [id])
   staff    User?                 @relation("HandledByStaff", fields: [staffId], references: [id])
   services TableSessionService[]
@@ -278,6 +283,25 @@ model OrderItem {
 
 // ==================== BONUS POINT SYSTEM ====================
 
+model BonusSettings {
+  id                 String   @id @default("default")
+  pointsPerVnd       Int      @default(10000) @map("points_per_vnd")
+  vndPerPoint        Int      @default(1000) @map("vnd_per_point")
+  maxDiscountPercent Int      @default(30) @map("max_discount_percent")
+  silverThreshold    Int      @default(1000) @map("silver_threshold")
+  goldThreshold      Int      @default(2000) @map("gold_threshold")
+  platinumThreshold  Int      @default(5000) @map("platinum_threshold")
+  diamondThreshold   Int      @default(10000) @map("diamond_threshold")
+  bronzeDiscount     Int      @default(5) @map("bronze_discount")
+  silverDiscount     Int      @default(10) @map("silver_discount")
+  goldDiscount       Int      @default(15) @map("gold_discount")
+  platinumDiscount   Int      @default(20) @map("platinum_discount")
+  diamondDiscount    Int      @default(25) @map("diamond_discount")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("bonus_settings")
+}
+
 model BonusTransaction {
   id          String               @id @default(uuid())
   userId      String               @map("user_id")
@@ -399,9 +423,10 @@ model TableBooking {
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @updatedAt @map("updated_at")
 
-  table       Table @relation(fields: [tableId], references: [id])
-  customer    User? @relation("CustomerBookings", fields: [customerId], references: [id])
-  confirmedBy User? @relation("BookingConfirmedBy", fields: [confirmedById], references: [id])
+  table       Table         @relation(fields: [tableId], references: [id])
+  customer    User?         @relation("CustomerBookings", fields: [customerId], references: [id])
+  confirmedBy User?         @relation("BookingConfirmedBy", fields: [confirmedById], references: [id])
+  session     TableSession?
 
   @@map("table_bookings")
 }

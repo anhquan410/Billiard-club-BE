@@ -2,8 +2,11 @@ import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { PrismaClient, TableStatus } from 'src/prisma';
+import { normalizeDatabaseUrl } from '../src/database/normalize-database-url';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({
+  connectionString: normalizeDatabaseUrl(process.env.DATABASE_URL ?? ''),
+});
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 

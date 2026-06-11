@@ -70,7 +70,7 @@ export class OrderService {
 
     // Tính điểm sẽ được tích
     const pointsToEarn = customerId
-      ? this.bonusService.calculatePointsFromAmount(finalTotal)
+      ? await this.bonusService.calculatePointsFromAmount(finalTotal)
       : 0;
 
     return {

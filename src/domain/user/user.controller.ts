@@ -51,6 +51,22 @@ export class UserController {
     return this.userService.paginate(query);
   }
 
+  // Tìm khách hàng (thu ngân / admin)
+  @Get('customers/search')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'CASHIER', 'STAFF')
+  searchCustomers(@Query('q') q?: string) {
+    return this.userService.searchCustomers(q);
+  }
+
+  // Nhân viên để giao công việc
+  @Get('staff/list')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'CASHIER', 'STAFF')
+  listStaffForAssignment() {
+    return this.userService.listStaffForAssignment();
+  }
+
   // Get user by ID (admin and Login-user)
   @Get(':id')
   @UseGuards(RolesGuard)

@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   BadRequestException,
   Injectable,
@@ -10,7 +13,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UserPaginationDto } from './dto/user-pagiation.dto';
 import { AuthUtils } from '../auth/utils/auth.utils';
-import { UserStatus } from 'src/prisma';
+import { Prisma, UserRole, UserStatus } from 'src/prisma';
 
 @Injectable()
 export class UserService {
@@ -98,6 +101,53 @@ export class UserService {
     return user;
   }
 
+  // Danh sách nhân viên để giao việc (không gồm khách hàng)
+  async listStaffForAssignment() {
+    return this.databaseService.user.findMany({
+      where: {
+        role: { in: [UserRole.ADMIN, UserRole.CASHIER, UserRole.STAFF] },
+        status: UserStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        fullName: true,
+        role: true,
+      },
+      orderBy: { fullName: 'asc' },
+    });
+  }
+
+  // Tìm khách hàng (cho thu ngân gán vào phiên chơi)
+  async searchCustomers(search?: string) {
+    const where: Prisma.UserWhereInput = {
+      role: UserRole.CUSTOMER,
+      status: UserStatus.ACTIVE,
+    };
+
+    const keyword = search?.trim();
+    if (keyword) {
+      where.OR = [
+        { fullName: { contains: keyword, mode: 'insensitive' } },
+        { phone: { contains: keyword, mode: 'insensitive' } },
+        { email: { contains: keyword, mode: 'insensitive' } },
+      ];
+    }
+
+    return this.databaseService.user.findMany({
+      where,
+      select: {
+        id: true,
+        fullName: true,
+        phone: true,
+        email: true,
+        bonusPoints: true,
+        membershipTier: true,
+      },
+      orderBy: { fullName: 'asc' },
+      take: 30,
+    });
+  }
+
   // Get all users (for admin)
   async getAllUsers() {
     return await this.databaseService.user.findMany({
@@ -154,6 +204,10 @@ export class UserService {
         await tx.tableSession.updateMany({
           where: { staffId: id },
           data: { staffId: null },
+        });
+        await tx.tableSession.updateMany({
+          where: { customerId: id },
+          data: { customerId: null },
         });
 
         await tx.order.updateMany({

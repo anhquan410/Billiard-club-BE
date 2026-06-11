@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 import { Injectable } from '@nestjs/common';
 import {
   MovementType,
@@ -18,7 +19,6 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   OTHER: 'Khác',
 };
 
-const OPERATING_HOURS_PER_DAY = 14;
 
 type DecimalLike = Prisma.Decimal | number | string | null | undefined;
 
@@ -29,7 +29,6 @@ export class ReportService {
   async getDashboard(query: ReportQueryDto) {
     const { from, to } = this.parseDateRange(query.fromDate, query.toDate);
     const period = query.period ?? ReportPeriod.MONTH;
-    const daysInRange = this.countDaysInRange(from, to);
 
     const orderWhere = this.buildOrderWhere(query, from, to);
     const orders = await this.databaseService.order.findMany({
@@ -50,7 +49,7 @@ export class ReportService {
     const revenueByDay = this.buildRevenueByDay(orders, from, to);
     const revenueByPaymentMethod = this.buildRevenueByPaymentMethod(orders);
     const topProducts = await this.buildTopProducts(query, from, to);
-    const tableUsage = await this.buildTableUsage(query, from, to, daysInRange);
+    const tableUsage = await this.buildTableUsage(query, from, to);
     const inventorySummary = await this.buildInventorySummary(from, to);
     const lowStockProducts = await this.buildLowStockProducts();
 
@@ -113,11 +112,11 @@ export class ReportService {
     lines.push('');
     lines.push('SỬ DỤNG BÀN');
     lines.push(
-      'Bàn,Số phiên,Tổng giờ,Tiền bàn,Doanh thu SP,Tổng DT,Sử dụng %',
+      'Bàn,Số phiên,Tổng giờ,Tiền bàn,Doanh thu SP,Tổng DT,Tổng DT sau giảm giá',
     );
     for (const row of data.tableUsage) {
       lines.push(
-        `${row.tableName},${row.sessionCount},${row.totalHours},${row.tableFeeRevenue},${row.productRevenue},${row.totalRevenue},${row.utilizationPercent}`,
+        `${row.tableName},${row.sessionCount},${row.totalHours},${row.tableFeeRevenue},${row.productRevenue},${row.totalRevenue},${row.totalRevenueAfterDiscount}`,
       );
     }
 
@@ -421,7 +420,6 @@ export class ReportService {
     query: ReportQueryDto,
     from: Date,
     to: Date,
-    daysInRange: number,
   ) {
     const sessionWhere: Prisma.TableSessionWhereInput = {
       status: SessionStatus.COMPLETED,
@@ -443,6 +441,7 @@ export class ReportService {
       include: {
         table: true,
         services: true,
+        order: { select: { total: true } },
       },
     });
 
@@ -455,6 +454,7 @@ export class ReportService {
         totalMinutes: number;
         tableFeeRevenue: number;
         productRevenue: number;
+        totalRevenueAfterDiscount: number;
       }
     >();
 
@@ -466,33 +466,31 @@ export class ReportService {
         totalMinutes: 0,
         tableFeeRevenue: 0,
         productRevenue: 0,
+        totalRevenueAfterDiscount: 0,
       };
 
       const productRev = session.services.reduce(
         (sum, service) => sum + this.toNumber(service.subtotal),
         0,
       );
+      const tableFee = this.toNumber(session.tablePrice);
+      const grossTotal = tableFee + productRev;
+      const paidTotal = session.order
+        ? this.toNumber(session.order.total)
+        : grossTotal;
 
       existing.sessionCount += 1;
       existing.totalMinutes += session.duration ?? 0;
-      existing.tableFeeRevenue += this.toNumber(session.tablePrice);
+      existing.tableFeeRevenue += tableFee;
       existing.productRevenue += productRev;
+      existing.totalRevenueAfterDiscount += paidTotal;
       tableMap.set(session.tableId, existing);
     }
-
-    const capacityHours = daysInRange * OPERATING_HOURS_PER_DAY;
 
     return Array.from(tableMap.values())
       .map((table) => {
         const totalHours = Math.round((table.totalMinutes / 60) * 10) / 10;
         const totalRevenue = table.tableFeeRevenue + table.productRevenue;
-        const utilizationPercent =
-          capacityHours > 0
-            ? Math.min(
-                100,
-                Math.round((totalHours / capacityHours) * 100),
-              )
-            : 0;
 
         return {
           tableId: table.tableId,
@@ -502,10 +500,10 @@ export class ReportService {
           tableFeeRevenue: Math.round(table.tableFeeRevenue),
           productRevenue: Math.round(table.productRevenue),
           totalRevenue: Math.round(totalRevenue),
-          utilizationPercent,
+          totalRevenueAfterDiscount: Math.round(table.totalRevenueAfterDiscount),
         };
       })
-      .sort((a, b) => b.totalRevenue - a.totalRevenue);
+      .sort((a, b) => b.totalRevenueAfterDiscount - a.totalRevenueAfterDiscount);
   }
 
   private async buildInventorySummary(from: Date, to: Date) {

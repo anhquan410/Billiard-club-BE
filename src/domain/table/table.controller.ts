@@ -48,9 +48,24 @@ export class TableController {
   async startSession(
     @Param('id') tableId: string,
     @User('id') userId: string,
-    @Body() body: { note?: string },
+    @Body() body: { note?: string; bookingId?: string },
   ) {
-    return this.tableService.startSession(tableId, userId, body.note);
+    return this.tableService.startSession(
+      tableId,
+      userId,
+      body.note,
+      body.bookingId,
+    );
+  }
+
+  // Gắn khách hàng vào phiên chơi đang active
+  @Patch(':id/active-session/assign-customer')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'CASHIER', 'STAFF')
+  async assignCustomer(
+    @Body() body: { sessionId: string; customerId: string | null },
+  ) {
+    return this.tableService.assignCustomer(body.sessionId, body.customerId);
   }
 
   // Gắn nhân viên phục vụ vào phiên chơi (Admin hoặc Cashier)
@@ -99,6 +114,8 @@ export class TableController {
       discount?: number;
       note?: string;
       customerId?: string;
+      bonusPointsToUse?: number;
+      useTierDiscount?: boolean;
     },
   ) {
     return this.tableService.endSession(tableId, userId, body);

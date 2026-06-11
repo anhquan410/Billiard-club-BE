@@ -1,3 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   BadRequestException,
   ForbiddenException,
@@ -6,15 +11,58 @@ import {
 } from '@nestjs/common';
 import { BookingStatus, Prisma, TableStatus } from 'src/prisma';
 import { DatabaseService } from 'src/database/database.service';
+import { NotificationService } from '../notification/notification.service';
 import { BookingQueryDto } from './dto/booking-query.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { CustomerCreateBookingDto } from './dto/customer-create-booking.dto';
 
+/** Số phút sau giờ bắt đầu đặt bàn mà chưa check-in thì tự trả bàn */
+export const CHECKIN_GRACE_MINUTES = 30;
+
 @Injectable()
 export class BookingService {
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly notificationService: NotificationService,
+  ) {}
+
+  /**
+   * Đặt bàn CONFIRMED + bàn RESERVED nhưng chưa check-in:
+   * quá giờ bắt đầu + grace → NO_SHOW và bàn về AVAILABLE.
+   * VD: đặt 18:00, đến 18:30 chưa bật bàn → tự động trả trống.
+   */
+  async releaseExpiredNoShowBookings(
+    graceMinutes = CHECKIN_GRACE_MINUTES,
+  ): Promise<number> {
+    const bookings = await this.databaseService.tableBooking.findMany({
+      where: {
+        status: BookingStatus.CONFIRMED,
+        session: { is: null },
+        table: { status: TableStatus.RESERVED },
+      },
+    });
+
+    const now = new Date();
+    let released = 0;
+
+    for (const booking of bookings) {
+      const startAt = this.parseBookingDateTime(
+        booking.bookingDate,
+        booking.startTime,
+      );
+      const deadline = new Date(startAt.getTime() + graceMinutes * 60 * 1000);
+
+      if (now >= deadline) {
+        await this.markNoShow(booking.id);
+        released++;
+      }
+    }
+
+    return released;
+  }
 
   async getDashboard(query: BookingQueryDto) {
+    await this.releaseExpiredNoShowBookings();
     const date = query.date ?? new Date().toISOString().slice(0, 10);
     const dateStart = new Date(`${date}T00:00:00.000Z`);
 
@@ -36,32 +84,41 @@ export class BookingService {
       ];
     }
 
-    const [bookings, allBookingsForSummary, availableTables] = await Promise.all([
-      this.databaseService.tableBooking.findMany({
-        where,
-        include: {
-          table: true,
-          confirmedBy: { select: { fullName: true } },
-        },
-        orderBy: [{ bookingDate: 'asc' }, { startTime: 'asc' }],
-      }),
-      this.databaseService.tableBooking.findMany({
-        select: { status: true, bookingDate: true },
-      }),
-      this.databaseService.table.findMany({
-        where: { status: TableStatus.AVAILABLE },
-        orderBy: { tableNumber: 'asc' },
-      }),
-    ]);
+    const [bookings, allBookingsForSummary, availableTables] =
+      await Promise.all([
+        this.databaseService.tableBooking.findMany({
+          where,
+          include: {
+            table: true,
+            confirmedBy: { select: { fullName: true } },
+          },
+          orderBy: [{ bookingDate: 'asc' }, { startTime: 'asc' }],
+        }),
+        this.databaseService.tableBooking.findMany({
+          select: { status: true, bookingDate: true },
+        }),
+        this.databaseService.table.findMany({
+          where: { status: TableStatus.AVAILABLE },
+          orderBy: { tableNumber: 'asc' },
+        }),
+      ]);
 
     const todayIso = new Date().toISOString().slice(0, 10);
     const summary = {
       total: allBookingsForSummary.length,
-      pending: allBookingsForSummary.filter((b) => b.status === BookingStatus.PENDING).length,
-      confirmed: allBookingsForSummary.filter((b) => b.status === BookingStatus.CONFIRMED).length,
-      completed: allBookingsForSummary.filter((b) => b.status === BookingStatus.COMPLETED).length,
+      pending: allBookingsForSummary.filter(
+        (b) => b.status === BookingStatus.PENDING,
+      ).length,
+      confirmed: allBookingsForSummary.filter(
+        (b) => b.status === BookingStatus.CONFIRMED,
+      ).length,
+      completed: allBookingsForSummary.filter(
+        (b) => b.status === BookingStatus.COMPLETED,
+      ).length,
       cancelled: allBookingsForSummary.filter(
-        (b) => b.status === BookingStatus.CANCELLED || b.status === BookingStatus.NO_SHOW,
+        (b) =>
+          b.status === BookingStatus.CANCELLED ||
+          b.status === BookingStatus.NO_SHOW,
       ).length,
       todayBookings: allBookingsForSummary.filter(
         (b) => b.bookingDate.toISOString().slice(0, 10) === todayIso,
@@ -81,6 +138,8 @@ export class BookingService {
   }
 
   async getMyBookings(customerId: string) {
+    await this.releaseExpiredNoShowBookings();
+
     const user = await this.databaseService.user.findUnique({
       where: { id: customerId },
     });
@@ -96,6 +155,7 @@ export class BookingService {
         include: {
           table: true,
           confirmedBy: { select: { fullName: true } },
+          session: { select: { id: true } },
         },
         orderBy: [{ bookingDate: 'desc' }, { startTime: 'desc' }],
       }),
@@ -106,7 +166,10 @@ export class BookingService {
     ]);
 
     return {
-      bookings: bookings.map((booking) => this.mapBooking(booking)),
+      bookings: bookings.map((booking) => ({
+        ...this.mapBooking(booking),
+        canCancel: this.canCustomerCancelBooking(booking),
+      })),
       availableTables: availableTables.map((table) => ({
         id: table.id,
         tableName: table.tableName,
@@ -163,6 +226,13 @@ export class BookingService {
       },
     });
 
+    if (customerId) {
+      await this.notificationService.sendBookingCreatedNotification(booking);
+      await this.notificationService.sendBookingSubmittedNotification(booking);
+    } else {
+      await this.notificationService.sendBookingRecordedNotification(booking);
+    }
+
     return this.mapBooking(booking);
   }
 
@@ -185,31 +255,146 @@ export class BookingService {
       data: { status: TableStatus.RESERVED },
     });
 
+    await this.notificationService.sendBookingConfirmedNotification(updated);
+
     return this.mapBooking(updated);
   }
 
-  async cancelBooking(id: string, userId?: string, role?: string) {
-    const booking = await this.findBookingOrThrow(id);
+  async getConfirmedBookingForTable(tableId: string) {
+    await this.releaseExpiredNoShowBookings();
 
-    if (role === 'CUSTOMER') {
-      if (booking.customerId !== userId) {
-        throw new ForbiddenException('Bạn chỉ được hủy đặt bàn của mình');
-      }
-      if (booking.status !== BookingStatus.PENDING) {
-        throw new BadRequestException('Chỉ có thể hủy đặt bàn đang chờ xác nhận');
-      }
-    }
-
-    const updated = await this.databaseService.tableBooking.update({
-      where: { id: booking.id },
-      data: { status: BookingStatus.CANCELLED },
+    const booking = await this.databaseService.tableBooking.findFirst({
+      where: {
+        tableId,
+        status: BookingStatus.CONFIRMED,
+      },
       include: {
         table: true,
         confirmedBy: { select: { fullName: true } },
       },
+      orderBy: [{ bookingDate: 'desc' }, { startTime: 'desc' }],
     });
 
+    if (!booking) {
+      return null;
+    }
+
+    return this.mapBooking(booking);
+  }
+
+  async markNoShow(id: string) {
+    const booking = await this.findBookingOrThrow(id);
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException(
+        'Chỉ đánh dấu không đến với đặt bàn đã xác nhận',
+      );
+    }
+
+    const updated = await this.databaseService.$transaction(async (tx) => {
+      const result = await tx.tableBooking.update({
+        where: { id: booking.id },
+        data: { status: BookingStatus.NO_SHOW },
+        include: {
+          table: true,
+          confirmedBy: { select: { fullName: true } },
+        },
+      });
+
+      await tx.table.updateMany({
+        where: { id: booking.tableId, status: TableStatus.RESERVED },
+        data: { status: TableStatus.AVAILABLE },
+      });
+
+      return result;
+    });
+
+    await this.notificationService.sendBookingNoShowNotification(updated);
+
     return this.mapBooking(updated);
+  }
+
+  async cancelBooking(id: string, userId?: string, role?: string) {
+    const booking = await this.databaseService.tableBooking.findUnique({
+      where: { id },
+      include: {
+        table: true,
+        confirmedBy: { select: { fullName: true } },
+        session: { select: { id: true } },
+      },
+    });
+    if (!booking) {
+      throw new NotFoundException('Không tìm thấy đặt bàn');
+    }
+
+    const wasConfirmed = booking.status === BookingStatus.CONFIRMED;
+
+    if (role === 'CUSTOMER') {
+      if (!userId) {
+        throw new ForbiddenException('Bạn chỉ được hủy đặt bàn của mình');
+      }
+
+      const user = await this.databaseService.user.findUnique({
+        where: { id: userId },
+      });
+      const isOwner =
+        booking.customerId === userId ||
+        (!!user?.phone && booking.customerPhone === user.phone);
+
+      if (!isOwner) {
+        throw new ForbiddenException('Bạn chỉ được hủy đặt bàn của mình');
+      }
+
+      if (!this.canCustomerCancelBooking(booking)) {
+        throw new BadRequestException(
+          'Không thể hủy đặt bàn đã check-in hoặc đã kết thúc',
+        );
+      }
+    }
+
+    const updated = await this.databaseService.$transaction(async (tx) => {
+      const result = await tx.tableBooking.update({
+        where: { id: booking.id },
+        data: { status: BookingStatus.CANCELLED },
+        include: {
+          table: true,
+          confirmedBy: { select: { fullName: true } },
+        },
+      });
+
+      if (wasConfirmed) {
+        await tx.table.updateMany({
+          where: { id: booking.tableId, status: TableStatus.RESERVED },
+          data: { status: TableStatus.AVAILABLE },
+        });
+      }
+
+      return result;
+    });
+
+    if (role && role !== 'CUSTOMER') {
+      await this.notificationService.sendBookingCancelledNotification(updated);
+    }
+
+    return this.mapBooking(updated);
+  }
+
+  /** Ghép ngày đặt + giờ bắt đầu theo múi giờ VN (UTC+7) */
+  private parseBookingDateTime(bookingDate: Date, time: string): Date {
+    const dateStr = bookingDate.toISOString().slice(0, 10);
+    const [hour, minute] = time.split(':').map((v) => parseInt(v, 10));
+    const hh = String(hour).padStart(2, '0');
+    const mm = String(minute).padStart(2, '0');
+    return new Date(`${dateStr}T${hh}:${mm}:00+07:00`);
+  }
+
+  private canCustomerCancelBooking(booking: {
+    status: BookingStatus;
+    session?: { id: string } | null;
+  }) {
+    return (
+      booking.status === BookingStatus.PENDING ||
+      (booking.status === BookingStatus.CONFIRMED && !booking.session)
+    );
   }
 
   private async findBookingOrThrow(id: string) {

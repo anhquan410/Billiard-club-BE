@@ -1,12 +1,22 @@
+/* eslint-disable @typescript-eslint/await-thenable */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
 import {
   BadRequestException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PaymentMethod, SessionStatus, TableStatus } from 'src/prisma';
+import {
+  BookingStatus,
+  PaymentMethod,
+  SessionStatus,
+  TableStatus,
+} from 'src/prisma';
 import { DatabaseService } from 'src/database/database.service';
 import { BilliardWebSocketGateway } from 'src/websocket/websocket.gateway';
 import { NotificationService } from '../notification/notification.service';
+import { BookingService } from '../booking/booking.service';
+import { BonusService } from '../bonus/bonus.service';
 
 @Injectable()
 export class TableService {
@@ -14,14 +24,69 @@ export class TableService {
     private readonly databaseService: DatabaseService,
     private readonly webSocketGateway: BilliardWebSocketGateway,
     private readonly notificationService: NotificationService,
+    private readonly bookingService: BookingService,
+    private readonly bonusService: BonusService,
   ) {}
 
-  // Lấy tất cả bàn
+  // Lấy tất cả bàn (kèm tên khách & tổng tiền ước tính nếu đang phục vụ)
   async getAllTables() {
+    await this.bookingService.releaseExpiredNoShowBookings();
+
     const tables = await this.databaseService.table.findMany({
       orderBy: { tableNumber: 'asc' },
+      include: {
+        sessions: {
+          where: { status: SessionStatus.ACTIVE },
+          take: 1,
+          include: {
+            customer: { select: { fullName: true } },
+            booking: { select: { customerName: true } },
+            services: { select: { subtotal: true } },
+          },
+        },
+        bookings: {
+          where: { status: BookingStatus.CONFIRMED },
+          take: 1,
+          select: { customerName: true },
+        },
+      },
     });
-    return tables;
+
+    const now = new Date();
+
+    return tables.map((table) => {
+      const session = table.sessions[0];
+      let customerName: string | null = null;
+      let estimatedTotal: number | null = null;
+
+      if (session) {
+        customerName =
+          session.customer?.fullName ?? session.booking?.customerName ?? null;
+
+        const durationMins = Math.ceil(
+          (now.getTime() - new Date(session.startTime).getTime()) / 60000,
+        );
+        const tablePrice =
+          Math.round(Number(table.hourlyRate) * (durationMins / 60) * 100) /
+          100;
+        let servicesTotal = 0;
+        for (const s of session.services) {
+          servicesTotal += Number(s.subtotal);
+        }
+        estimatedTotal = Math.round((tablePrice + servicesTotal) * 100) / 100;
+      } else if (table.status === TableStatus.RESERVED && table.bookings[0]) {
+        customerName = table.bookings[0].customerName;
+      }
+
+      const { sessions: _sessions, bookings: _bookings, ...rest } = table;
+
+      return {
+        ...rest,
+        hourlyRate: Number(rest.hourlyRate),
+        customerName: customerName ?? undefined,
+        estimatedTotal: estimatedTotal ?? undefined,
+      };
+    });
   }
 
   // Lấy thông tin bàn theo ID
@@ -67,6 +132,27 @@ export class TableService {
             fullName: true,
             email: true,
             role: true,
+          },
+        },
+        booking: {
+          select: {
+            id: true,
+            bookingCode: true,
+            customerId: true,
+            customerName: true,
+            customerPhone: true,
+            startTime: true,
+            endTime: true,
+          },
+        },
+        customer: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            email: true,
+            bonusPoints: true,
+            membershipTier: true,
           },
         },
       },
@@ -171,15 +257,65 @@ export class TableService {
     };
   }
 
-  // Bật bàn (bắt đầu phiên chơi)
-  async startSession(tableId: string, cashierId: string, note?: string) {
-    // 1. Kiểm tra bàn có tồn tại và đang AVAILABLE không
+  // Bật bàn (bắt đầu phiên chơi) — walk-in (AVAILABLE) hoặc check-in đặt bàn (RESERVED)
+  async startSession(
+    tableId: string,
+    cashierId: string,
+    note?: string,
+    bookingId?: string,
+  ) {
     const table = await this.databaseService.table.findUnique({
       where: { id: tableId },
     });
     if (!table) throw new NotFoundException('Không tìm thấy bàn!');
-    if (table.status !== TableStatus.AVAILABLE)
+    if (table.status === TableStatus.OCCUPIED) {
+      throw new BadRequestException('Bàn này đang có khách chơi!');
+    }
+    if (
+      table.status !== TableStatus.AVAILABLE &&
+      table.status !== TableStatus.RESERVED
+    ) {
       throw new BadRequestException('Bàn này hiện không sẵn sàng!');
+    }
+
+    let linkedBookingId: string | null = null;
+    let bookingCustomerId: string | null = null;
+    let bookingInfo: {
+      id: string;
+      bookingCode: string;
+      customerName: string;
+      customerPhone: string;
+      startTime: string;
+      endTime: string;
+    } | null = null;
+
+    if (table.status === TableStatus.RESERVED) {
+      const booking = await this.databaseService.tableBooking.findFirst({
+        where: {
+          tableId: table.id,
+          status: BookingStatus.CONFIRMED,
+          ...(bookingId ? { id: bookingId } : {}),
+        },
+        orderBy: [{ bookingDate: 'desc' }, { startTime: 'desc' }],
+      });
+
+      if (!booking) {
+        throw new BadRequestException(
+          'Không tìm thấy đặt bàn đã xác nhận cho bàn này. Vui lòng kiểm tra lại.',
+        );
+      }
+
+      linkedBookingId = booking.id;
+      bookingCustomerId = booking.customerId;
+      bookingInfo = {
+        id: booking.id,
+        bookingCode: booking.bookingCode,
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+      };
+    }
 
     const cashier = await this.databaseService.user.findUnique({
       where: { id: cashierId },
@@ -188,10 +324,11 @@ export class TableService {
       throw new BadRequestException('Không tìm thấy thông tin thu ngân!');
     }
 
-    // 2. Tạo session mới
     const session = await this.databaseService.tableSession.create({
       data: {
         tableId: table.id,
+        bookingId: linkedBookingId,
+        customerId: bookingCustomerId,
         cashierId,
         note,
         startTime: new Date(),
@@ -211,6 +348,19 @@ export class TableService {
       tableNumber: table.tableNumber,
     });
 
+    if (linkedBookingId) {
+      const linkedBooking = await this.databaseService.tableBooking.findUnique({
+        where: { id: linkedBookingId },
+        include: { table: true },
+      });
+      if (linkedBooking) {
+        await this.notificationService.sendBookingCheckInNotification(
+          linkedBooking,
+          table.tableName,
+        );
+      }
+    }
+
     // 5. Emit WebSocket event - bàn đã được bật
     this.webSocketGateway.emitTableStarted({
       tableId: table.id,
@@ -219,13 +369,52 @@ export class TableService {
       sessionId: session.id,
     });
 
-    // 6. Trả về session mới và trạng thái bàn hiện tại
     return {
-      message: 'Bàn đã được bật & bắt đầu tính giờ',
+      message: linkedBookingId
+        ? 'Check-in đặt bàn thành công, bắt đầu tính giờ'
+        : 'Bàn đã được bật & bắt đầu tính giờ',
       sessionId: session.id,
-      table: table,
-      session,
+      table: { ...table, status: TableStatus.OCCUPIED },
+      session: { ...session, booking: bookingInfo },
+      bookingCustomerId,
+      checkedInFromBooking: !!linkedBookingId,
     };
+  }
+
+  // Gắn khách hàng vào phiên chơi đang active
+  async assignCustomer(sessionId: string, customerId: string | null) {
+    const session = await this.databaseService.tableSession.findUnique({
+      where: { id: sessionId },
+    });
+    if (!session || session.status !== SessionStatus.ACTIVE) {
+      throw new BadRequestException('Session không hợp lệ hoặc đã kết thúc!');
+    }
+
+    if (customerId) {
+      const customer = await this.databaseService.user.findFirst({
+        where: { id: customerId, role: 'CUSTOMER', status: 'ACTIVE' },
+      });
+      if (!customer) {
+        throw new BadRequestException('Không tìm thấy khách hàng!');
+      }
+    }
+
+    return this.databaseService.tableSession.update({
+      where: { id: sessionId },
+      data: { customerId },
+      include: {
+        customer: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            email: true,
+            bonusPoints: true,
+            membershipTier: true,
+          },
+        },
+      },
+    });
   }
 
   // Gắn nhân viên phục vụ vào phiên chơi (Admin hoặc Cashier đều làm được)
@@ -288,6 +477,8 @@ export class TableService {
       discount?: number;
       note?: string;
       customerId?: string;
+      bonusPointsToUse?: number;
+      useTierDiscount?: boolean;
     },
   ) {
     // 1. Kiểm tra bàn và session “đang chơi” (ACTIVE)
@@ -304,7 +495,26 @@ export class TableService {
         tableId: table.id,
         status: SessionStatus.ACTIVE, // Chỉ session đang chơi
       },
-      include: { services: true, staff: true },
+      include: {
+        services: true,
+        staff: true,
+        booking: {
+          select: {
+            id: true,
+            customerId: true,
+            bookingCode: true,
+            customerName: true,
+            customerPhone: true,
+          },
+        },
+        customer: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+          },
+        },
+      },
     });
     if (!session)
       throw new BadRequestException('Không tìm thấy session đang chơi!');
@@ -329,29 +539,83 @@ export class TableService {
     }
     servicesTotal = Math.round(servicesTotal * 100) / 100;
 
-    // 5. Tổng hợp tổng tiền, discount, total
-    const discount = body.discount ?? 0;
+    // 5. Tổng hợp tổng tiền, giảm giá thủ công + bonus
+    const manualDiscount = body.discount ?? 0;
     const subtotal = tablePrice + servicesTotal;
-    const total = subtotal - discount;
+    const amountBeforeBonus = Math.max(0, subtotal - manualDiscount);
     const orderNumber = 'HD' + Date.now();
 
-    // 6. Lưu hóa đơn (Order)
+    const orderCustomerId =
+      body.customerId ??
+      session.customerId ??
+      session.booking?.customerId ??
+      null;
+
+    let bonusPointsUsed = 0;
+    let discountFromPoints = 0;
+    let discountFromTier = 0;
+    let bonusPointsEarned = 0;
+
+    if (orderCustomerId) {
+      const pointsToUse = body.bonusPointsToUse ?? 0;
+      const useTierDiscount = body.useTierDiscount ?? true;
+
+      if (pointsToUse > 0 || useTierDiscount) {
+        const discountCalc = await this.bonusService.calculateOrderDiscount(
+          orderCustomerId,
+          amountBeforeBonus,
+          pointsToUse > 0 ? pointsToUse : undefined,
+          useTierDiscount && pointsToUse === 0,
+        );
+
+        discountFromPoints = discountCalc.pointsDiscount;
+        discountFromTier = discountCalc.tierDiscount;
+        bonusPointsUsed = pointsToUse > 0 ? pointsToUse : 0;
+      }
+
+      bonusPointsEarned = await this.bonusService.calculatePointsFromAmount(
+        Math.max(0, amountBeforeBonus - discountFromPoints - discountFromTier),
+      );
+    }
+
+    const total = Math.max(
+      0,
+      amountBeforeBonus - discountFromPoints - discountFromTier,
+    );
+
     const order = await this.databaseService.order.create({
       data: {
         sessionId: session.id,
         createdBy: userId,
         subtotal: subtotal,
-        discount: discount,
-        tax: 0, // Nếu có VAT bổ sung sau
+        discount: manualDiscount,
+        tax: 0,
         total: total,
         paymentMethod: body.paymentMethod,
         status: 'PAID',
         paidAt: endTime,
         note: body.note ?? '',
-        customerId: body.customerId ?? null,
+        customerId: orderCustomerId,
         orderNumber: orderNumber,
+        bonusPointsUsed,
+        bonusPointsEarned,
+        discountFromPoints,
+        discountFromTier,
       },
     });
+
+    if (orderCustomerId && bonusPointsUsed > 0) {
+      await this.bonusService.redeemPoints(
+        orderCustomerId,
+        order.id,
+        bonusPointsUsed,
+        amountBeforeBonus,
+      );
+    }
+
+    if (orderCustomerId) {
+      await this.bonusService.earnPoints(orderCustomerId, order.id, total);
+    }
 
     // 6.1. Tạo OrderItem từ TableSessionService
     if (session.services && session.services.length > 0) {
@@ -384,11 +648,33 @@ export class TableService {
       data: { status: 'AVAILABLE' },
     });
 
+    if (session.bookingId) {
+      await this.databaseService.tableBooking.update({
+        where: { id: session.bookingId },
+        data: { status: BookingStatus.COMPLETED },
+      });
+    }
+
     // 8. Emit WebSocket event - bàn đã được tắt
     this.webSocketGateway.emitTableEnded({
       tableId: table.id,
       tableNumber: table.tableNumber,
       status: TableStatus.AVAILABLE,
+    });
+
+    const customerName =
+      session.customer?.fullName ?? session.booking?.customerName ?? undefined;
+
+    await this.notificationService.sendTablePaymentNotification({
+      tableId: table.id,
+      tableName: table.tableName,
+      tableNumber: table.tableNumber,
+      total,
+      durationMins,
+      orderNumber,
+      customerId: orderCustomerId,
+      customerPhone: session.customer?.phone ?? session.booking?.customerPhone,
+      customerName,
     });
 
     // Sau khi cập nhật hóa đơn, session, table
@@ -447,6 +733,9 @@ export class TableService {
       tablePrice,
       servicesTotal,
       total,
+      bonusPointsEarned,
+      discountFromTier,
+      discountFromPoints,
     };
   }
 }

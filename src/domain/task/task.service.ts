@@ -1,5 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { TaskStatus } from 'src/prisma';
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable prettier/prettier */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { TaskStatus, UserRole, UserStatus } from 'src/prisma';
 import { DatabaseService } from 'src/database/database.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { TaskQueryDto } from './dto/task-query.dto';
@@ -51,6 +60,19 @@ export class TaskService {
   }
 
   async createTask(dto: CreateTaskDto, userId: string) {
+    const assignee = await this.databaseService.user.findFirst({
+      where: {
+        id: dto.assigneeId,
+        role: { in: [UserRole.ADMIN, UserRole.CASHIER, UserRole.STAFF] },
+        status: UserStatus.ACTIVE,
+      },
+    });
+    if (!assignee) {
+      throw new BadRequestException(
+        'Người thực hiện phải là nhân viên (Admin / Thu ngân / Staff)',
+      );
+    }
+
     const task = await this.databaseService.staffTask.create({
       data: {
         title: dto.title,
