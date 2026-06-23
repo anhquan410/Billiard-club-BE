@@ -13,14 +13,14 @@ export class AccountingController {
 
   @Get('dashboard')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'STAFF')
+  @Roles('ADMIN', 'CASHIER', 'STAFF')
   getDashboard(@Query() query: AccountingQueryDto) {
     return this.accountingService.getDashboard(query);
   }
 
   @Post('transactions')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'STAFF')
+  @Roles('ADMIN', 'CASHIER', 'STAFF')
   createTransaction(
     @Body() body: CreateTransactionDto,
     @User('id') userId: string,
@@ -30,7 +30,7 @@ export class AccountingController {
 
   @Post('debts')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'STAFF')
+  @Roles('ADMIN', 'CASHIER', 'STAFF')
   createDebt(@Body() body: CreateDebtDto) {
     return this.accountingService.createDebt(body);
   }
