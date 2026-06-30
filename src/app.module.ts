@@ -17,6 +17,8 @@ import { ReportModule } from './domain/report/report.module';
 import { AccountingModule } from './domain/accounting/accounting.module';
 import { BookingModule } from './domain/booking/booking.module';
 import { TaskModule } from './domain/task/task.module';
+import { WorkScheduleModule } from './domain/work-schedule/work-schedule.module';
+import { PayrollModule } from './domain/payroll/payroll.module';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { TaskModule } from './domain/task/task.module';
     AccountingModule,
     BookingModule,
     TaskModule,
+    WorkScheduleModule,
+    PayrollModule,
   ],
   controllers: [AppController],
   providers: [AppService],

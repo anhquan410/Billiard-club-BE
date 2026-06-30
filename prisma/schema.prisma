@@ -69,6 +69,10 @@ model User {
   assignedTasks          StaffTask[]             @relation("TaskAssignee")
   createdTasks           StaffTask[]             @relation("TaskCreator")
   accountingTransactions AccountingTransaction[] @relation("AccountingCreatedBy")
+  workScheduleWeeks      WorkScheduleWeek[]      @relation("ScheduleOwner")
+  reviewedSchedules      WorkScheduleWeek[]      @relation("ScheduleReviewer")
+  payrollAdjustments     PayrollAdjustment[]     @relation("PayrollAdjustmentTarget")
+  createdPayrollAdjustments PayrollAdjustment[] @relation("PayrollAdjustmentCreator")
 
   @@map("users")
 }
@@ -464,6 +468,86 @@ model StaffTask {
   createdBy User @relation("TaskCreator", fields: [createdById], references: [id])
 
   @@map("staff_tasks")
+}
+
+// ==================== WORK SCHEDULE ====================
+
+enum ShiftType {
+  DAY
+  EVENING
+  NIGHT
+}
+
+enum WorkScheduleStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+model WorkScheduleWeek {
+  id           String             @id @default(uuid())
+  userId       String             @map("user_id")
+  weekStart    DateTime           @map("week_start") @db.Date
+  status       WorkScheduleStatus @default(DRAFT)
+  submittedAt  DateTime?          @map("submitted_at")
+  reviewedAt   DateTime?          @map("reviewed_at")
+  reviewedById String?            @map("reviewed_by_id")
+  rejectReason String?            @map("reject_reason")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+
+  user     User                    @relation("ScheduleOwner", fields: [userId], references: [id])
+  reviewer User?                   @relation("ScheduleReviewer", fields: [reviewedById], references: [id])
+  shifts   WorkShiftRegistration[]
+
+  @@unique([userId, weekStart])
+  @@map("work_schedule_weeks")
+}
+
+model WorkShiftRegistration {
+  id        String    @id @default(uuid())
+  weekId    String    @map("week_id")
+  workDate  DateTime  @map("work_date") @db.Date
+  shiftType ShiftType @map("shift_type")
+
+  week WorkScheduleWeek @relation(fields: [weekId], references: [id], onDelete: Cascade)
+
+  @@unique([weekId, workDate, shiftType])
+  @@map("work_shift_registrations")
+}
+
+// ==================== PAYROLL ====================
+
+model PayrollSettings {
+  id               String   @id @default("default")
+  dayShiftRate     Decimal  @default(150000) @map("day_shift_rate") @db.Decimal(12, 2)
+  eveningShiftRate Decimal  @default(180000) @map("evening_shift_rate") @db.Decimal(12, 2)
+  nightShiftRate   Decimal  @default(200000) @map("night_shift_rate") @db.Decimal(12, 2)
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("payroll_settings")
+}
+
+enum PayrollAdjustmentType {
+  BONUS
+  PENALTY
+}
+
+model PayrollAdjustment {
+  id          String                @id @default(uuid())
+  userId      String                @map("user_id")
+  type        PayrollAdjustmentType
+  amount      Decimal               @db.Decimal(12, 2)
+  reason      String
+  periodMonth DateTime              @map("period_month") @db.Date
+  createdById String                @map("created_by_id")
+  createdAt   DateTime              @default(now()) @map("created_at")
+
+  user      User @relation("PayrollAdjustmentTarget", fields: [userId], references: [id])
+  createdBy User @relation("PayrollAdjustmentCreator", fields: [createdById], references: [id])
+
+  @@map("payroll_adjustments")
 }
 
 // ==================== NOTIFICATION ====================
