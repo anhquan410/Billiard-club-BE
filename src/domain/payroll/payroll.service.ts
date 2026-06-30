@@ -203,7 +203,11 @@ export class PayrollService {
     try {
       const adjustment = await this.db.payrollAdjustment.update({
         where: { id },
-        data: { reason: dto.reason },
+        data: {
+          type: dto.type,
+          amount: dto.amount,
+          reason: dto.reason,
+        },
         include: {
           user: { select: { id: true, fullName: true } },
           createdBy: { select: { id: true, fullName: true } },

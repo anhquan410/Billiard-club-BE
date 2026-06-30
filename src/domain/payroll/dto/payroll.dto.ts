@@ -47,6 +47,14 @@ export class CreatePayrollAdjustmentDto {
 }
 
 export class UpdatePayrollAdjustmentDto {
+  @IsEnum(PayrollAdjustmentType)
+  type!: PayrollAdjustmentType;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  amount!: number;
+
   @IsString()
   reason!: string;
 }
