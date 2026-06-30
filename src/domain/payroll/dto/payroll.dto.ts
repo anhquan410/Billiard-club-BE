@@ -46,6 +46,11 @@ export class CreatePayrollAdjustmentDto {
   month!: string;
 }
 
+export class UpdatePayrollAdjustmentDto {
+  @IsString()
+  reason!: string;
+}
+
 export class PayrollMonthQueryDto {
   @Matches(/^\d{4}-\d{2}$/)
   month!: string;

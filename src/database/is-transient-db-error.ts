@@ -13,6 +13,7 @@ export function isTransientDbError(error: unknown): boolean {
     err.code === 'ECONNREFUSED' ||
     err.code === 'P1001' ||
     err.code === 'P1002' ||
+    err.code === 'P1008' ||
     err.code === 'P1017'
   ) {
     return true;
@@ -23,6 +24,7 @@ export function isTransientDbError(error: unknown): boolean {
     message.includes('connection terminated') ||
     message.includes('connection timeout') ||
     message.includes('timeout expired') ||
+    message.includes('sockettimeout') ||
     message.includes("can't reach database server")
   ) {
     return true;

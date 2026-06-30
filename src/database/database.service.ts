@@ -30,7 +30,7 @@ export class DatabaseService
     const normalizedUrl = normalizeDatabaseUrl(connectionString);
     const pool = new Pool({
       connectionString: normalizedUrl,
-      max: 5,
+      max: 10,
       idleTimeoutMillis: 10_000,
       connectionTimeoutMillis: 30_000,
       keepAlive: true,

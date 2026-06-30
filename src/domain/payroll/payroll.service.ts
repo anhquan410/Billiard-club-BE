@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import {
   PayrollAdjustmentType,
+  Prisma,
   ShiftType,
   UserRole,
   UserStatus,
@@ -19,6 +20,7 @@ import { DatabaseService } from 'src/database/database.service';
 import { formatDateOnly, getMonthRange } from 'src/common/utils/vn-timezone';
 import {
   CreatePayrollAdjustmentDto,
+  UpdatePayrollAdjustmentDto,
   UpdatePayrollSettingsDto,
 } from './dto/payroll.dto';
 
@@ -85,8 +87,73 @@ export class PayrollService {
       orderBy: { fullName: 'asc' },
     });
 
-    const summaries = await Promise.all(
-      employees.map((emp) => this.buildPayrollSummary(emp.id, month)),
+    if (employees.length === 0) {
+      return {
+        month,
+        totals: {
+          totalShifts: 0,
+          shiftSalary: 0,
+          bonuses: 0,
+          penalties: 0,
+          netSalary: 0,
+        },
+        employees: [],
+      };
+    }
+
+    const employeeIds = employees.map((emp) => emp.id);
+    const settings = await this.getSettings();
+    const { start, end } = getMonthRange(month);
+
+    const [allShifts, allAdjustments] = await Promise.all([
+      this.db.workShiftRegistration.findMany({
+        where: {
+          workDate: { gte: start, lte: end },
+          week: {
+            userId: { in: employeeIds },
+            status: WorkScheduleStatus.APPROVED,
+          },
+        },
+        include: {
+          week: { select: { userId: true, weekStart: true, status: true } },
+        },
+        orderBy: [{ workDate: 'asc' }, { shiftType: 'asc' }],
+      }),
+      this.db.payrollAdjustment.findMany({
+        where: {
+          userId: { in: employeeIds },
+          periodMonth: { gte: start, lte: end },
+        },
+        include: {
+          createdBy: { select: { id: true, fullName: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const shiftsByUser = new Map<string, typeof allShifts>();
+    for (const shift of allShifts) {
+      const userId = shift.week.userId;
+      const list = shiftsByUser.get(userId) ?? [];
+      list.push(shift);
+      shiftsByUser.set(userId, list);
+    }
+
+    const adjustmentsByUser = new Map<string, typeof allAdjustments>();
+    for (const adjustment of allAdjustments) {
+      const list = adjustmentsByUser.get(adjustment.userId) ?? [];
+      list.push(adjustment);
+      adjustmentsByUser.set(adjustment.userId, list);
+    }
+
+    const summaries = employees.map((employee) =>
+      this.assemblePayrollSummary(
+        employee,
+        month,
+        settings,
+        shiftsByUser.get(employee.id) ?? [],
+        adjustmentsByUser.get(employee.id) ?? [],
+      ),
     );
 
     const totals = summaries.reduce(
@@ -132,6 +199,44 @@ export class PayrollService {
     return this.mapAdjustment(adjustment);
   }
 
+  async updateAdjustment(id: string, dto: UpdatePayrollAdjustmentDto) {
+    try {
+      const adjustment = await this.db.payrollAdjustment.update({
+        where: { id },
+        data: { reason: dto.reason },
+        include: {
+          user: { select: { id: true, fullName: true } },
+          createdBy: { select: { id: true, fullName: true } },
+        },
+      });
+
+      return this.mapAdjustment(adjustment);
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException('Không tìm thấy khoản thưởng/phạt');
+      }
+      throw error;
+    }
+  }
+
+  async deleteAdjustment(id: string) {
+    try {
+      await this.db.payrollAdjustment.delete({ where: { id } });
+      return { message: 'Đã xóa khoản thưởng/phạt' };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException('Không tìm thấy khoản thưởng/phạt');
+      }
+      throw error;
+    }
+  }
+
   async getAdjustments(month: string, userId?: string) {
     const { start, end } = getMonthRange(month);
     const adjustments = await this.db.payrollAdjustment.findMany({
@@ -158,20 +263,66 @@ export class PayrollService {
     const settings = await this.getSettings();
     const { start, end } = getMonthRange(month);
 
-    const approvedShifts = await this.db.workShiftRegistration.findMany({
-      where: {
-        workDate: { gte: start, lte: end },
-        week: {
-          userId,
-          status: WorkScheduleStatus.APPROVED,
+    const [approvedShifts, adjustments] = await Promise.all([
+      this.db.workShiftRegistration.findMany({
+        where: {
+          workDate: { gte: start, lte: end },
+          week: {
+            userId,
+            status: WorkScheduleStatus.APPROVED,
+          },
         },
-      },
-      include: {
-        week: { select: { weekStart: true, status: true } },
-      },
-      orderBy: [{ workDate: 'asc' }, { shiftType: 'asc' }],
-    });
+        include: {
+          week: { select: { userId: true, weekStart: true, status: true } },
+        },
+        orderBy: [{ workDate: 'asc' }, { shiftType: 'asc' }],
+      }),
+      this.db.payrollAdjustment.findMany({
+        where: {
+          userId,
+          periodMonth: { gte: start, lte: end },
+        },
+        include: {
+          createdBy: { select: { id: true, fullName: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
+    return this.assemblePayrollSummary(
+      user,
+      month,
+      settings,
+      approvedShifts,
+      adjustments,
+    );
+  }
+
+  private assemblePayrollSummary(
+    user: { id: string; fullName: string; role: string },
+    month: string,
+    settings: {
+      dayShiftRate: number;
+      eveningShiftRate: number;
+      nightShiftRate: number;
+    },
+    approvedShifts: {
+      id: string;
+      workDate: Date;
+      shiftType: ShiftType;
+      week: { weekStart: Date };
+    }[],
+    adjustments: {
+      id: string;
+      userId: string;
+      type: PayrollAdjustmentType;
+      amount: { toString(): string } | number;
+      reason: string;
+      periodMonth: Date;
+      createdAt: Date;
+      createdBy: { id: string; fullName: string };
+    }[],
+  ) {
     const rateMap: Record<ShiftType, number> = {
       DAY: settings.dayShiftRate,
       EVENING: settings.eveningShiftRate,
@@ -208,17 +359,6 @@ export class PayrollService {
       (sum, b) => sum + b.amount,
       0,
     );
-
-    const adjustments = await this.db.payrollAdjustment.findMany({
-      where: {
-        userId,
-        periodMonth: { gte: start, lte: end },
-      },
-      include: {
-        createdBy: { select: { id: true, fullName: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
 
     const bonuses = adjustments
       .filter((a) => a.type === PayrollAdjustmentType.BONUS)

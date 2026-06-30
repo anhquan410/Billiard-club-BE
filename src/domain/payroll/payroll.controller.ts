@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -15,6 +17,7 @@ import {
   CreatePayrollAdjustmentDto,
   PayrollAdjustmentQueryDto,
   PayrollMonthQueryDto,
+  UpdatePayrollAdjustmentDto,
   UpdatePayrollSettingsDto,
 } from './dto/payroll.dto';
 import { PayrollService } from './payroll.service';
@@ -72,6 +75,23 @@ export class PayrollController {
     @Body() body: CreatePayrollAdjustmentDto,
   ) {
     return this.payrollService.createAdjustment(adminId, body);
+  }
+
+  @Patch('admin/adjustments/:id')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  updateAdjustment(
+    @Param('id') id: string,
+    @Body() body: UpdatePayrollAdjustmentDto,
+  ) {
+    return this.payrollService.updateAdjustment(id, body);
+  }
+
+  @Delete('admin/adjustments/:id')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  deleteAdjustment(@Param('id') id: string) {
+    return this.payrollService.deleteAdjustment(id);
   }
 
   @Get('adjustments')
