@@ -22,25 +22,22 @@ export class TaskController {
 
   @Get('dashboard')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'STAFF')
+  @Roles('ADMIN', 'CASHIER', 'STAFF')
   getDashboard(@Query() query: TaskQueryDto) {
     return this.taskService.getDashboard(query);
   }
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'STAFF')
+  @Roles('ADMIN', 'CASHIER', 'STAFF')
   createTask(@Body() body: CreateTaskDto, @User('id') userId: string) {
     return this.taskService.createTask(body, userId);
   }
 
   @Patch(':id/status')
   @UseGuards(RolesGuard)
-  @Roles('ADMIN', 'STAFF')
-  updateTaskStatus(
-    @Param('id') id: string,
-    @Body() body: UpdateTaskStatusDto,
-  ) {
+  @Roles('ADMIN', 'CASHIER', 'STAFF')
+  updateTaskStatus(@Param('id') id: string, @Body() body: UpdateTaskStatusDto) {
     return this.taskService.updateTaskStatus(id, body);
   }
 }
